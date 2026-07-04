@@ -275,6 +275,15 @@
   .modal-actions .primary{background:var(--teal);color:#fff;}
   .modal-actions .ghost{background:#fff;border:1px solid var(--line);color:var(--ink-soft);}
   .modal-actions .danger{background:#fff;border:1px solid var(--red);color:var(--red);}
+
+  .stat.clickable{cursor:pointer;transition:border-color .15s,background .15s;}
+  .stat.clickable:hover{border-color:var(--red);background:var(--red-bg);}
+  .lowrow{padding:.55rem .1rem;border-bottom:1px solid var(--line);}
+  .lowrow:last-child{border-bottom:none;}
+  .lowmain{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+  .lowname{font-weight:700;font-size:.92rem;}
+  .lowmeta{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:3px;}
+  .lowstock{font-size:.82rem;color:var(--red);white-space:nowrap;}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -290,7 +299,7 @@
 
   <div class="stats">
     <div class="stat"><div class="num" id="statCount">0</div><div class="lbl">教材種類</div></div>
-    <div class="stat warn"><div class="num" id="statLow">0</div><div class="lbl">庫存不足項目</div></div>
+    <div class="stat warn clickable" onclick="showLowStock()" title="點我看是哪些教材庫存不足"><div class="num" id="statLow">0</div><div class="lbl">庫存不足項目 ›</div></div>
     <div class="stat"><div class="num" id="statToday">0</div><div class="lbl">今日進出貨筆數</div></div>
     <div class="stat"><div class="num" id="statValue">$0</div><div class="lbl">目前庫存總值（依進貨價）</div></div>
     <div class="stat"><div class="num" id="statRevenue">$0</div><div class="lbl">本月營收（出貨）</div></div>
@@ -423,6 +432,17 @@
   </div>
 </div>
 
+<div class="modal" id="lowStockModal">
+  <div class="modal-box">
+    <h3>庫存不足項目</h3>
+    <p style="margin:.2rem 0 .8rem;">以下教材目前庫存低於安全庫存，建議盡快補貨。</p>
+    <div id="lowStockList" style="max-height:56vh;overflow-y:auto;"></div>
+    <div class="modal-actions">
+      <button class="ghost" onclick="closeLowStock()">關閉</button>
+    </div>
+  </div>
+</div>
+
 <script>
 let items = [];
 let moves = [];
@@ -522,6 +542,27 @@ async function clearSettings(){
   localStorage.setItem(CFG_KEY, JSON.stringify({url:'', key:''}));
   location.reload();
 }
+
+function showLowStock(){
+  const list = items.filter(i=>i.stock < i.safety)
+                    .sort((a,b)=> (a.stock - a.safety) - (b.stock - b.safety));
+  const wrap = document.getElementById('lowStockList');
+  if(list.length === 0){
+    wrap.innerHTML = '<div class="empty">目前沒有庫存不足的教材，庫存都在安全水位。</div>';
+  } else {
+    wrap.innerHTML = list.map(i=>{
+      const ident = i.barcode ? escapeHtml(i.barcode) : (i.code ? escapeHtml(i.code) : '—');
+      return '<div class="lowrow">'
+        + '<div class="lowmain"><span class="lowname">' + escapeHtml(i.name) + '</span>'
+        + '<span class="catbadge">' + escapeHtml(i.category) + '</span></div>'
+        + '<div class="lowmeta"><span class="barcode-cell">' + ident + '</span>'
+        + '<span class="lowstock">庫存 <b>' + i.stock + ' ' + escapeHtml(i.unit) + '</b> ／ 安全 ' + i.safety + '</span></div>'
+        + '</div>';
+    }).join('');
+  }
+  document.getElementById('lowStockModal').classList.add('show');
+}
+function closeLowStock(){ document.getElementById('lowStockModal').classList.remove('show'); }
 
 /* ---------- 資料存取層（雲端 Supabase / 本機 localStorage 雙模式）---------- */
 function saveLocalItems(){ localStorage.setItem(ITEMS_KEY, JSON.stringify(items)); }
