@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>序曲音樂學院｜教材庫存管理</title>
+<style>
+  :root{
+    --ink:#112639;
+    --ink-soft:#566e81;
+    --paper:#faf5ec;
+    --card:#ffffff;
+    --line:#dde3e6;
+    --teal:#3f82a9;
+    --teal-deep:#112639;
+    --teal-bg:#e4eef3;
+    --amber:#b35417;
+    --amber-bg:#f6e2d1;
+    --red:#9c3b28;
+    --red-bg:#f5ddd2;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;
+    background:var(--paper);
+    color:var(--ink);
+    padding:0 0 4rem;
+  }
+  header{
+    background:var(--teal-deep);
+    color:#f4efe2;
+    padding:1.6rem 2rem;
+  }
+  header h1{
+    margin:0;
+    font-size:1.4rem;
+    font-weight:700;
+    letter-spacing:.02em;
+  }
+  header p{
+    margin:.3rem 0 0;
+    font-size:.85rem;
+    color:#bcd8ce;
+  }
+  main{
+    max-width:1080px;
+    margin:0 auto;
+    padding:1.5rem 1.5rem 0;
+  }
+  .stats{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+    gap:12px;
+    margin-bottom:1.5rem;
+  }
+  .stat{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:.9rem 1rem;
+  }
+  .stat .num{font-size:1.5rem;font-weight:700;color:var(--teal-deep);}
+  .stat .lbl{font-size:.76rem;color:var(--ink-soft);margin-top:2px;}
+  .stat.warn .num{color:var(--red);}
+
+  .panel{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:1.25rem 1.4rem;
+    margin-bottom:1.5rem;
+  }
+  .panel h2{
+    font-size:1.02rem;
+    margin:0 0 1rem;
+    font-weight:700;
+  }
+  .mode-switch{
+    display:flex;
+    gap:8px;
+    margin-bottom:1rem;
+  }
+  .mode-btn{
+    flex:1;
+    padding:.7rem;
+    border-radius:8px;
+    border:1.5px solid var(--line);
+    background:#fff;
+    font-size:.95rem;
+    font-weight:700;
+    cursor:pointer;
+    color:var(--ink-soft);
+  }
+  .mode-btn.active[data-mode="in"]{background:var(--teal-bg);border-color:var(--teal);color:var(--teal-deep);}
+  .mode-btn.active[data-mode="out"]{background:var(--amber-bg);border-color:var(--amber);color:#7a4c0d;}
+
+  .scan-row{
+    display:flex;
+    gap:10px;
+    align-items:stretch;
+    flex-wrap:wrap;
+  }
+  .scan-row input[type=text]{
+    flex:1;
+    min-width:180px;
+    font-size:1.1rem;
+    padding:.75rem .9rem;
+    border-radius:8px;
+    border:1.5px solid var(--line);
+    font-family:monospace;
+  }
+  .scan-row input[type=number]{
+    width:100px;
+    font-size:1.1rem;
+    padding:.75rem .5rem;
+    border-radius:8px;
+    border:1.5px solid var(--line);
+    text-align:center;
+  }
+  .scan-row button{
+    padding:.75rem 1.2rem;
+    border-radius:8px;
+    border:none;
+    background:var(--teal);
+    color:#fff;
+    font-weight:700;
+    cursor:pointer;
+    font-size:.95rem;
+  }
+  .fieldlbl{font-size:.72rem;color:var(--ink-soft);display:block;margin-bottom:2px;}
+  .scan-field{display:flex;flex-direction:column;}
+  .hint{font-size:.78rem;color:var(--ink-soft);margin-top:.5rem;}
+  .flash{
+    margin-top:.8rem;
+    padding:.6rem .9rem;
+    border-radius:8px;
+    font-size:.9rem;
+    display:none;
+  }
+  .flash.ok{display:block;background:var(--teal-bg);color:var(--teal-deep);}
+  .flash.err{display:block;background:var(--red-bg);color:var(--red);}
+
+  .newitem{
+    margin-top:1rem;
+    padding:1rem;
+    border:1.5px dashed var(--amber);
+    border-radius:8px;
+    background:var(--amber-bg);
+    display:none;
+  }
+  .newitem.show{display:block;}
+  .newitem .grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:8px;
+    margin:.6rem 0;
+  }
+  .newitem label{font-size:.78rem;color:var(--ink-soft);display:block;margin-bottom:2px;}
+  .newitem input, .newitem select{
+    width:100%;
+    padding:.5rem .6rem;
+    border-radius:6px;
+    border:1px solid var(--line);
+    font-size:.9rem;
+    background:#fff;
+  }
+  .newitem .actions{display:flex;gap:8px;margin-top:.5rem;}
+  .newitem button{
+    padding:.55rem 1rem;
+    border-radius:6px;
+    border:none;
+    font-weight:700;
+    cursor:pointer;
+    font-size:.85rem;
+  }
+  .newitem .save{background:var(--teal);color:#fff;}
+  .newitem .cancel{background:#fff;border:1px solid var(--line);color:var(--ink-soft);}
+
+  .toolbar{display:flex;gap:8px;margin-bottom:.8rem;align-items:center;flex-wrap:wrap;}
+  .toolbar input[type=text], .toolbar select{
+    padding:.5rem .7rem;
+    border-radius:6px;
+    border:1px solid var(--line);
+    font-size:.85rem;
+  }
+  .toolbar input[type=text]{flex:1;min-width:160px;}
+  .toolbar button{
+    padding:.5rem .8rem;
+    border-radius:6px;
+    border:1px solid var(--line);
+    background:#fff;
+    font-size:.8rem;
+    cursor:pointer;
+    color:var(--ink-soft);
+    white-space:nowrap;
+  }
+
+  .tablewrap{overflow-x:auto;}
+  table{width:100%;border-collapse:collapse;font-size:.83rem;}
+  th{
+    text-align:left;
+    padding:.5rem .5rem;
+    color:var(--ink-soft);
+    font-weight:700;
+    border-bottom:1.5px solid var(--line);
+    font-size:.75rem;
+    white-space:nowrap;
+  }
+  td{padding:.55rem .5rem;border-bottom:1px solid var(--line);white-space:nowrap;}
+  tr.low td{background:var(--red-bg);}
+  .badge{
+    font-size:.72rem;
+    padding:2px 8px;
+    border-radius:20px;
+    font-weight:700;
+  }
+  .badge.ok{background:var(--teal-bg);color:var(--teal-deep);}
+  .badge.low{background:var(--red-bg);color:var(--red);}
+  .catbadge{
+    font-size:.72rem;
+    padding:2px 8px;
+    border-radius:20px;
+    background:var(--teal-bg);
+    color:var(--teal-deep);
+    font-weight:700;
+  }
+  .rowbtn{
+    border:none;background:none;cursor:pointer;color:var(--ink-soft);
+    font-size:.8rem;text-decoration:underline;padding:0 4px;
+  }
+  .empty{color:var(--ink-soft);font-size:.85rem;padding:1rem 0;text-align:center;}
+  .barcode-cell{font-family:monospace;font-size:.8rem;color:var(--ink-soft);}
+  .footnote{font-size:.75rem;color:var(--ink-soft);text-align:center;margin-top:1rem;}
+
+  /* 後端連線狀態橫幅 */
+  .backend{border-radius:10px;padding:.6rem .9rem;margin-bottom:1rem;font-size:.85rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .backend.ok{background:var(--teal-bg);color:var(--teal-deep);}
+  .backend.warn{background:var(--amber-bg);color:#7a4c0d;}
+  .linkbtn{border:none;background:none;text-decoration:underline;cursor:pointer;color:inherit;font-weight:700;font-size:.85rem;padding:0;}
+
+  /* 出貨購物車 */
+  #cartPanel{display:none;}
+  .cart-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:.6rem;}
+  .cart-total{font-size:1.05rem;font-weight:700;color:var(--amber);}
+  .cart-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:.8rem;}
+  .cart-actions input[type=text]{flex:1;min-width:160px;padding:.55rem .7rem;border-radius:8px;border:1px solid var(--line);font-size:.9rem;}
+  .btn-checkout{padding:.7rem 1.4rem;border-radius:8px;border:none;background:var(--amber);color:#fff;font-weight:700;font-size:.95rem;cursor:pointer;}
+  .btn-checkout:disabled{background:#d9c3ae;cursor:not-allowed;}
+  .btn-ghost{padding:.7rem 1rem;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink-soft);font-weight:700;cursor:pointer;}
+
+  /* 異動紀錄卡片 */
+  .logcard{border:1px solid var(--line);border-radius:10px;padding:.6rem .8rem;margin-bottom:.6rem;background:#fff;}
+  .logcard.sale{border-left:4px solid var(--amber);}
+  .logcard.voided{opacity:.5;}
+  .logtop{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .logtime{font-size:.8rem;color:var(--ink-soft);}
+  .logbody{margin-top:.35rem;font-size:.88rem;}
+  .salesum{font-size:.85rem;color:var(--ink-soft);}
+  .salenote{margin-top:.35rem;font-size:.82rem;color:var(--amber);}
+  .saleitems{margin:.4rem 0 0;padding-left:1.1rem;font-size:.86rem;}
+  .saleitems li{margin:.15rem 0;}
+  .saleitems li.voided{text-decoration:line-through;color:var(--ink-soft);}
+  .voidmark{font-size:.75rem;color:var(--red);font-weight:700;}
+
+  /* 設定彈窗 */
+  .modal{display:none;position:fixed;inset:0;background:rgba(17,38,57,.45);z-index:50;align-items:center;justify-content:center;padding:1rem;}
+  .modal.show{display:flex;}
+  .modal-box{background:#fff;border-radius:14px;padding:1.4rem 1.5rem;max-width:520px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.25);}
+  .modal-box h3{margin:0 0 .3rem;font-size:1.1rem;}
+  .modal-box p{margin:.2rem 0 1rem;font-size:.82rem;color:var(--ink-soft);line-height:1.6;}
+  .modal-box label{display:block;font-size:.78rem;color:var(--ink-soft);margin:.6rem 0 2px;}
+  .modal-box input{width:100%;padding:.55rem .7rem;border-radius:8px;border:1px solid var(--line);font-size:.9rem;font-family:monospace;}
+  .modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:1.2rem;flex-wrap:wrap;}
+  .modal-actions button{padding:.55rem 1.1rem;border-radius:8px;border:none;font-weight:700;cursor:pointer;font-size:.88rem;}
+  .modal-actions .primary{background:var(--teal);color:#fff;}
+  .modal-actions .ghost{background:#fff;border:1px solid var(--line);color:var(--ink-soft);}
+  .modal-actions .danger{background:#fff;border:1px solid var(--red);color:var(--red);}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<header>
+  <h1>序曲音樂學院 · 教材庫存管理</h1>
+  <p>掃描條碼機（或手動輸入編號）即可完成進貨 / 出貨登記</p>
+</header>
+
+<main>
+  <div id="backendBanner" class="backend warn"></div>
+
+  <div class="stats">
+    <div class="stat"><div class="num" id="statCount">0</div><div class="lbl">教材種類</div></div>
+    <div class="stat warn"><div class="num" id="statLow">0</div><div class="lbl">庫存不足項目</div></div>
+    <div class="stat"><div class="num" id="statToday">0</div><div class="lbl">今日進出貨筆數</div></div>
+    <div class="stat"><div class="num" id="statValue">$0</div><div class="lbl">目前庫存總值（依進貨價）</div></div>
+    <div class="stat"><div class="num" id="statRevenue">$0</div><div class="lbl">本月營收（出貨）</div></div>
+    <div class="stat"><div class="num" id="statProfit">$0</div><div class="lbl">本月毛利</div></div>
+    <div class="stat warn"><div class="num" id="statPlaceholder">0</div><div class="lbl">待補實際條碼</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>掃描登記</h2>
+    <div class="mode-switch">
+      <button class="mode-btn active" data-mode="in" onclick="setMode('in')">進貨（入庫）</button>
+      <button class="mode-btn" data-mode="out" onclick="setMode('out')">出貨（出庫）</button>
+    </div>
+    <div class="scan-row">
+      <div class="scan-field" style="flex:1;min-width:180px;">
+        <span class="fieldlbl">條碼／編號</span>
+        <input type="text" id="barcodeInput" placeholder="用條碼機掃描，或手動輸入後按 Enter">
+      </div>
+      <div class="scan-field">
+        <span class="fieldlbl">數量</span>
+        <input type="number" id="qtyInput" value="1" min="1">
+      </div>
+      <div class="scan-field">
+        <span class="fieldlbl" id="priceLbl">本次進貨單價</span>
+        <input type="number" id="priceInput" placeholder="留空沿用" min="0">
+      </div>
+      <div class="scan-field" style="justify-content:flex-end;">
+        <span class="fieldlbl">&nbsp;</span>
+        <button id="scanBtn" onclick="handleScan()">確認進貨</button>
+      </div>
+    </div>
+    <div class="hint">單價留空時，會沿用該教材目前設定的進貨價／出貨價；有輸入則會更新為新的單價。</div>
+    <div class="flash" id="flash"></div>
+
+    <div class="newitem" id="newItemForm">
+      <div style="font-weight:700;color:#7a4c0d;">找不到這個編號 — 是否要建立新教材？</div>
+      <div class="grid">
+        <div><label>條碼／編號</label><input type="text" id="niCode" readonly></div>
+        <div><label>教材名稱 *</label><input type="text" id="niName" placeholder="例如：拜爾鋼琴教本(一)"></div>
+        <div><label>分類</label>
+          <select id="niCategory">
+            <option value="鋼琴">鋼琴</option>
+            <option value="爵士鼓">爵士鼓</option>
+            <option value="小提琴">小提琴</option>
+            <option value="長笛">長笛</option>
+            <option value="樂理">樂理</option>
+            <option value="教具">教具</option>
+            <option value="檢定">檢定</option>
+            <option value="其他">其他</option>
+          </select>
+        </div>
+        <div><label>單位</label><input type="text" id="niUnit" placeholder="例如：本" value="本"></div>
+        <div><label>期初庫存</label><input type="number" id="niStock" value="0" min="0"></div>
+        <div><label>安全庫存</label><input type="number" id="niSafety" value="3" min="0"></div>
+        <div><label>進貨價（成本）</label><input type="number" id="niCost" value="0" min="0"></div>
+        <div><label>出貨價（售價）</label><input type="number" id="niSell" value="0" min="0"></div>
+      </div>
+      <div class="actions">
+        <button class="save" onclick="saveNewItem()">建立並登記本次數量</button>
+        <button class="cancel" onclick="cancelNewItem()">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="cartPanel">
+    <div class="cart-head">
+      <h2 style="margin:0;">本次出貨清單（<span id="cartCount">0</span> 件）</h2>
+      <div class="cart-total">合計 <span id="cartTotal">$0</span></div>
+    </div>
+    <div class="tablewrap" id="cartWrap"></div>
+    <div class="cart-actions">
+      <input type="text" id="saleNote" placeholder="備註（選填，例如學生名／訂單說明）">
+      <button class="btn-ghost" onclick="cartClear()">清空</button>
+      <button class="btn-checkout" id="checkoutBtn" onclick="checkout()" disabled>結帳出貨</button>
+    </div>
+    <div class="hint">出貨模式下，掃描或輸入編號會把教材加入這張清單；確認無誤後按「結帳出貨」，會一次記成同一張出貨單並扣庫存。</div>
+  </div>
+
+  <div class="panel">
+    <h2>庫存總覽</h2>
+    <div class="toolbar">
+      <input type="text" id="searchBox" placeholder="搜尋名稱／編號" oninput="renderItems()">
+      <select id="catFilter" onchange="renderItems()">
+        <option value="">全部分類</option>
+        <option value="鋼琴">鋼琴</option>
+        <option value="爵士鼓">爵士鼓</option>
+        <option value="小提琴">小提琴</option>
+        <option value="長笛">長笛</option>
+        <option value="樂理">樂理</option>
+        <option value="教具">教具</option>
+        <option value="檢定">檢定</option>
+        <option value="其他">其他</option>
+      </select>
+      <button onclick="openManualAdd()">+ 手動新增教材</button>
+      <button onclick="exportItemsCSV()">匯出庫存 CSV</button>
+      <button onclick="exportBackup()">匯出備份 JSON</button>
+      <button onclick="document.getElementById('importFile').click()">還原備份</button>
+      <input type="file" id="importFile" accept="application/json,.json" style="display:none" onchange="importBackupFile(this)">
+    </div>
+    <div class="tablewrap" id="itemsTableWrap"></div>
+  </div>
+
+  <div class="panel">
+    <h2>最近異動紀錄</h2>
+    <div class="toolbar">
+      <button onclick="exportLogCSV()">匯出紀錄 CSV</button>
+    </div>
+    <div class="tablewrap" id="logTableWrap"></div>
+  </div>
+
+  <div class="footnote">庫存資料為共用資料，所有使用此頁面的同事看到的是同一份庫存與紀錄。<br>已匯入 203 筆現有教材資料，編號暫沿用舊登記編號（非實體條碼），標示「舊編號．待補條碼」的項目，之後掃描該教材實際條碼時，用「改編號」按鈕輸入即可，之後掃描就能直接對應。</div>
+</main>
+
+<div class="modal" id="settingsModal">
+  <div class="modal-box">
+    <h3>雲端後端設定（Supabase）</h3>
+    <p>貼上你的 Supabase 專案網址與 anon key，就會切換成「所有裝置共用同一份庫存」。<br>
+       在 Supabase 後台 → Project Settings → API 可以找到：<b>Project URL</b> 與 <b>anon public</b> key。<br>
+       留空或清除則回到「本機模式」（只存這台裝置）。</p>
+    <label>Project URL</label>
+    <input type="text" id="cfgUrl" placeholder="https://xxxxxxxx.supabase.co">
+    <label>anon public key</label>
+    <input type="text" id="cfgKey" placeholder="eyJhbGciOi...">
+    <div class="modal-actions">
+      <button class="danger" onclick="clearSettings()">清除、改用本機</button>
+      <button class="ghost" onclick="closeSettings()">取消</button>
+      <button class="primary" onclick="saveSettings()">儲存並連線</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let items = [];
+let moves = [];
+let mode = 'in';
+let pendingCode = '';
+let cart = [];
+let sb = null;
+let rtChannel = null;
+
+const ITEMS_KEY = 'materials-items';
+const MOVES_KEY = 'materials-moves';
+const CFG_KEY = 'materials-supabase-cfg';
+const CATEGORIES = ['鋼琴','爵士鼓','小提琴','長笛','樂理','教具','檢定','其他'];
+const SEED_ITEMS = []; /* 雲端已初始化，網頁版不內建種子資料 */
+/* ---------- 小工具 ---------- */
+function money(n){ return '$' + Math.round(n||0).toLocaleString('zh-TW'); }
+function uuid(){ return (crypto.randomUUID ? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(16).slice(2)); }
+function jesc(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function itemByCode(code){ return items.find(i=>i.code===code); }
+function fmtTime(ts){ return new Date(ts).toLocaleString('zh-TW', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'}); }
+
+function flash(msg, ok){
+  const f = document.getElementById('flash');
+  f.textContent = msg;
+  f.className = 'flash ' + (ok?'ok':'err');
+  clearTimeout(window._flashTimer);
+  window._flashTimer = setTimeout(()=>{ f.className='flash'; }, 3500);
+}
+
+function beep(ok){
+  try{
+    const ctx = beep._ctx || (beep._ctx = new (window.AudioContext||window.webkitAudioContext)());
+    if(ctx.state==='suspended') ctx.resume();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = 'square';
+    o.frequency.value = ok ? 880 : 200;
+    const dur = ok ? 0.12 : 0.32;
+    g.gain.setValueAtTime(0.15, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+    o.start(); o.stop(ctx.currentTime + dur);
+  }catch(e){}
+  if(navigator.vibrate) navigator.vibrate(ok ? 40 : [80,40,80]);
+}
+
+/* ---------- 後端設定 / 連線 ---------- */
+/* 預設雲端後端（序曲音樂學院專案）— 每台裝置打開即自動連線，無需手動設定 */
+const DEFAULT_SUPABASE_URL = 'https://wanpsjdnvkqaddzqyqyc.supabase.co';
+const DEFAULT_SUPABASE_KEY = 'sb_publishable_AU9HPghbL2BlLRsxzzPskA_IadwWMWl';
+function getCfg(){
+  const raw = localStorage.getItem(CFG_KEY);
+  if(raw){ try{ return JSON.parse(raw); }catch(e){} }
+  return {url: DEFAULT_SUPABASE_URL, key: DEFAULT_SUPABASE_KEY};
+}
+function cloudReady(){ return !!sb; }
+function initCloud(){
+  const c = getCfg();
+  if(c.url && c.key && window.supabase){
+    try{ sb = window.supabase.createClient(c.url, c.key); }catch(e){ sb = null; }
+  } else { sb = null; }
+  updateBackendBanner();
+  return cloudReady();
+}
+function updateBackendBanner(){
+  const b = document.getElementById('backendBanner');
+  if(!b) return;
+  if(cloudReady()){
+    b.className = 'backend ok';
+    b.innerHTML = '☁ 已連接雲端後端 — 所有裝置共用同一份庫存與紀錄　<button class="linkbtn" onclick="openSettings()">變更設定</button>';
+  } else {
+    b.className = 'backend warn';
+    b.innerHTML = '⚠ 尚未連接雲端，目前資料只存在這台裝置（本機模式）　<button class="linkbtn" onclick="openSettings()">設定雲端後端</button>';
+  }
+}
+function openSettings(){
+  const c = getCfg();
+  document.getElementById('cfgUrl').value = c.url || '';
+  document.getElementById('cfgKey').value = c.key || '';
+  document.getElementById('settingsModal').classList.add('show');
+}
+function closeSettings(){ document.getElementById('settingsModal').classList.remove('show'); }
+async function saveSettings(){
+  const url = document.getElementById('cfgUrl').value.trim().replace(/\/+$/,'');
+  const key = document.getElementById('cfgKey').value.trim();
+  localStorage.setItem(CFG_KEY, JSON.stringify({url, key}));
+  closeSettings();
+  initCloud();
+  try{ await ensureSeed(); }catch(e){ flash('初始化失敗：'+(e.message||e), false); }
+  subscribeRealtime();
+  await refresh();
+  flash(cloudReady() ? '已連接雲端後端' : '已切換為本機模式', true);
+}
+async function clearSettings(){
+  if(!confirm('確定要清除雲端設定、改用本機模式嗎？')) return;
+  localStorage.setItem(CFG_KEY, JSON.stringify({url:'', key:''}));
+  location.reload();
+}
+
+/* ---------- 資料存取層（雲端 Supabase / 本機 localStorage 雙模式）---------- */
+function saveLocalItems(){ localStorage.setItem(ITEMS_KEY, JSON.stringify(items)); }
+function saveLocalMoves(){ localStorage.setItem(MOVES_KEY, JSON.stringify(moves)); }
+
+async function dbLoadItems(){
+  if(cloudReady()){
+    const {data, error} = await sb.from('items').select('*');
+    if(error) throw error;
+    return data || [];
+  }
+  try{ return JSON.parse(localStorage.getItem(ITEMS_KEY)) || []; }catch(e){ return []; }
+}
+async function dbLoadMoves(){
+  if(cloudReady()){
+    const {data, error} = await sb.from('moves').select('*').order('ts', {ascending:false}).limit(1000);
+    if(error) throw error;
+    return data || [];
+  }
+  try{ return JSON.parse(localStorage.getItem(MOVES_KEY)) || []; }catch(e){ return []; }
+}
+async function dbInsertItem(it){
+  if(cloudReady()){ const {error} = await sb.from('items').insert(it); if(error) throw error; }
+  else { items.push(it); saveLocalItems(); }
+}
+async function dbUpdateItemFields(it, fields){
+  if(cloudReady()){ const {error} = await sb.from('items').update(fields).eq('id', it.id); if(error) throw error; }
+  else { Object.assign(it, fields); saveLocalItems(); }
+}
+async function dbDeleteItem(it){
+  if(cloudReady()){ const {error} = await sb.from('items').delete().eq('id', it.id); if(error) throw error; }
+  else { items = items.filter(x=>x.code!==it.code); saveLocalItems(); }
+}
+async function dbAdjustStock(code, delta){
+  if(cloudReady()){ const {error} = await sb.rpc('adjust_stock', {p_code:code, p_delta:delta}); if(error) throw error; }
+  else { const it = itemByCode(code); if(it) it.stock += delta; saveLocalItems(); }
+}
+async function dbInsertMoves(rows){
+  if(cloudReady()){ const {error} = await sb.from('moves').insert(rows); if(error) throw error; }
+  else { rows.forEach(r=>{ if(!r.id) r.id = uuid(); }); moves = rows.concat(moves); saveLocalMoves(); }
+}
+async function dbVoidMoves(ids){
+  if(cloudReady()){ const {error} = await sb.from('moves').update({voided:true}).in('id', ids); if(error) throw error; }
+  else { moves.forEach(m=>{ if(ids.includes(m.id)) m.voided = true; }); saveLocalMoves(); }
+}
+
+function normalizeItem(i){
+  i.cost = Number(i.cost) || 0;
+  i.sell = Number(i.sell) || 0;
+  i.stock = Number(i.stock) || 0;
+  i.safety = Number(i.safety) || 0;
+  i.placeholder = !!i.placeholder;
+  if(!CATEGORIES.includes(i.category)) i.category = '其他';
+}
+
+async function ensureSeed(){
+  const existing = await dbLoadItems();
+  if(existing.length > 0) return;
+  const seed = JSON.parse(JSON.stringify(SEED_ITEMS));
+  if(cloudReady()){
+    for(let i=0;i<seed.length;i+=100){
+      const {error} = await sb.from('items').insert(seed.slice(i, i+100));
+      if(error) throw error;
+    }
+  } else {
+    items = seed; saveLocalItems();
+  }
+}
+
+let _rtTimer = null;
+function scheduleRefresh(){ clearTimeout(_rtTimer); _rtTimer = setTimeout(refresh, 400); }
+function subscribeRealtime(){
+  if(rtChannel && sb){ try{ sb.removeChannel(rtChannel); }catch(e){} }
+  rtChannel = null;
+  if(!cloudReady()) return;
+  rtChannel = sb.channel('materials-rt')
+    .on('postgres_changes', {event:'*', schema:'public', table:'items'}, scheduleRefresh)
+    .on('postgres_changes', {event:'*', schema:'public', table:'moves'}, scheduleRefresh)
+    .subscribe();
+}
+
+async function refresh(){
+  try{
+    items = await dbLoadItems();
+    items.forEach(normalizeItem);
+    moves = await dbLoadMoves();
+    renderAll();
+  }catch(e){ flash('讀取資料失敗：'+(e.message||e), false); }
+}
+
+async function init(){
+  initCloud();
+  try{ await ensureSeed(); }catch(e){ flash('初始化失敗：'+(e.message||e), false); }
+  subscribeRealtime();
+  await refresh();
+  document.getElementById('barcodeInput').focus();
+}
+
+function setMode(m){
+  mode = m;
+  document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active', b.dataset.mode===m));
+  document.getElementById('priceLbl').textContent = m==='in' ? '本次進貨單價' : '本次售價';
+  document.getElementById('scanBtn').textContent = m==='in' ? '確認進貨' : '加入購物車';
+  document.getElementById('cartPanel').style.display = m==='out' ? 'block' : 'none';
+  document.getElementById('barcodeInput').focus();
+}
+
+document.getElementById('barcodeInput').addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ e.preventDefault(); handleScan(); }
+});
+
+function makeMove(type, snap, qty, price, unitCost, saleId){
+  return { type, code:snap.code, name:snap.name, category:snap.category,
+           qty, price, subtotal:Math.round(price*qty*100)/100,
+           unit_cost:unitCost||0, sale_id:saleId||null, note:null, voided:false,
+           ts:new Date().toISOString() };
+}
+
+async function handleScan(){
+  const codeInput = document.getElementById('barcodeInput');
+  const code = codeInput.value.trim();
+  if(!code) return;
+  const qty = Math.max(1, parseInt(document.getElementById('qtyInput').value) || 1);
+  const priceRaw = document.getElementById('priceInput').value;
+  const priceEntered = priceRaw !== '' ? Math.max(0, parseFloat(priceRaw)) : null;
+
+  const item = itemByCode(code);
+  if(!item){
+    pendingCode = code;
+    document.getElementById('niCode').value = code;
+    document.getElementById('niName').value = '';
+    document.getElementById('newItemForm').classList.add('show');
+    document.getElementById('niName').focus();
+    beep(false);
+    flash('找不到編號 ' + code + '，請在下方建立新教材', false);
+    return;
+  }
+
+  if(mode === 'in'){
+    const unitPrice = priceEntered !== null ? priceEntered : item.cost;
+    try{
+      await dbUpdateItemFields(item, {cost:unitPrice});
+      await dbAdjustStock(code, qty);
+      await dbInsertMoves([ makeMove('in', item, qty, unitPrice, unitPrice, null) ]);
+    }catch(e){ beep(false); flash('進貨失敗：'+(e.message||e), false); return; }
+    beep(true);
+    flash('已進貨 ' + qty + ' ' + item.unit + '，單價 ' + money(unitPrice) + ' — ' + item.name, true);
+    codeInput.value=''; document.getElementById('priceInput').value=''; codeInput.focus();
+    await refresh();
+  } else {
+    addToCart(item, qty, priceEntered);
+    codeInput.value=''; document.getElementById('priceInput').value=''; codeInput.focus();
+  }
+}
+
+/* ---------- 出貨購物車 ---------- */
+function cartQtyFor(code){ return cart.filter(c=>c.code===code).reduce((s,c)=>s+c.qty,0); }
+function addToCart(item, qty, priceEntered){
+  const avail = item.stock - cartQtyFor(item.code);
+  if(avail < qty){
+    beep(false);
+    flash('庫存不足：' + item.name + ' 目前最多可再出 ' + Math.max(0, avail) + ' ' + item.unit, false);
+    return;
+  }
+  const price = priceEntered !== null ? priceEntered : item.sell;
+  const ex = cart.find(c=>c.code===item.code);
+  if(ex){ ex.qty += qty; if(priceEntered !== null) ex.price = price; ex.subtotal = ex.qty*ex.price; }
+  else cart.push({code:item.code, name:item.name, unit:item.unit, category:item.category, qty, price, cost:item.cost, subtotal:qty*price});
+  beep(true);
+  renderCart();
+  flash('已加入出貨清單：' + item.name + ' ×' + qty, true);
+}
+function cartSetQty(code, q){
+  const c = cart.find(x=>x.code===code);
+  if(!c) return;
+  q = Math.max(1, parseInt(q) || 1);
+  const item = itemByCode(code);
+  if(item){
+    const others = cartQtyFor(code) - c.qty;
+    if(q > item.stock - others){ flash('超過可出庫存，已調整為最大可出數量', false); q = Math.max(1, item.stock - others); }
+  }
+  c.qty = q; c.subtotal = c.qty*c.price;
+  renderCart();
+}
+function cartRemove(code){ cart = cart.filter(c=>c.code!==code); renderCart(); }
+function cartClear(){ if(cart.length && !confirm('確定清空本次出貨清單？')) return; cart = []; renderCart(); }
+
+async function checkout(){
+  if(cart.length === 0) return;
+  const saleId = uuid();
+  const note = (document.getElementById('saleNote').value || '').trim();
+  const rows = cart.map(c=>{
+    const m = makeMove('out', {code:c.code, name:c.name, category:c.category}, c.qty, c.price, c.cost, saleId);
+    m.note = note || null;
+    return m;
+  });
+  const total = cart.reduce((s,c)=>s+c.subtotal, 0);
+  const n = cart.length;
+  try{
+    for(const c of cart){ await dbAdjustStock(c.code, -c.qty); }
+    await dbInsertMoves(rows);
+    for(const c of cart){ const it = itemByCode(c.code); if(it) await dbUpdateItemFields(it, {sell:c.price}); }
+  }catch(e){ beep(false); flash('出貨失敗：'+(e.message||e), false); return; }
+  beep(true);
+  flash('出貨完成 ✓ 共 ' + n + ' 項 / ' + money(total), true);
+  cart = [];
+  document.getElementById('saleNote').value = '';
+  renderCart();
+  await refresh();
+}
+
+function cancelNewItem(){
+  document.getElementById('newItemForm').classList.remove('show');
+  document.getElementById('barcodeInput').value='';
+  document.getElementById('barcodeInput').focus();
+}
+
+async function saveNewItem(){
+  const name = document.getElementById('niName').value.trim();
+  if(!name){ alert('請輸入教材名稱'); return; }
+  const category = document.getElementById('niCategory').value;
+  const unit = document.getElementById('niUnit').value.trim() || '本';
+  const initStock = Math.max(0, parseInt(document.getElementById('niStock').value) || 0);
+  const safety = Math.max(0, parseInt(document.getElementById('niSafety').value) || 0);
+  const cost = Math.max(0, parseFloat(document.getElementById('niCost').value) || 0);
+  const sell = Math.max(0, parseFloat(document.getElementById('niSell').value) || 0);
+  const qty = Math.max(0, parseInt(document.getElementById('qtyInput').value) || 0);
+  const priceRaw = document.getElementById('priceInput').value;
+  const priceEntered = priceRaw !== '' ? Math.max(0, parseFloat(priceRaw)) : null;
+
+  if(itemByCode(pendingCode)){ alert('編號 ' + pendingCode + ' 已存在'); return; }
+  const newItem = {code:pendingCode, name, category, unit, stock:initStock, safety, cost, sell, placeholder:false};
+  try{ await dbInsertItem(newItem); }catch(e){ alert('建立失敗：'+(e.message||e)); return; }
+  await refresh();
+  const created = itemByCode(pendingCode);
+
+  if(qty > 0 && created){
+    if(mode === 'in'){
+      const unitPrice = priceEntered !== null ? priceEntered : cost;
+      try{
+        await dbUpdateItemFields(created, {cost:unitPrice});
+        await dbAdjustStock(created.code, qty);
+        await dbInsertMoves([ makeMove('in', created, qty, unitPrice, unitPrice, null) ]);
+      }catch(e){ flash('登記進貨失敗：'+(e.message||e), false); }
+      await refresh();
+    } else {
+      addToCart(itemByCode(pendingCode), qty, priceEntered);
+    }
+  }
+  document.getElementById('newItemForm').classList.remove('show');
+  beep(true);
+  flash('已建立教材「' + name + '」', true);
+  document.getElementById('barcodeInput').value='';
+  document.getElementById('priceInput').value='';
+  document.getElementById('qtyInput').value=1;
+  document.getElementById('barcodeInput').focus();
+}
+
+function openManualAdd(){
+  const code = 'M' + String(items.filter(i=>i.code.startsWith('M')).length + 1).padStart(4,'0');
+  pendingCode = code;
+  document.getElementById('niCode').value = code;
+  document.getElementById('niName').value = '';
+  document.getElementById('niStock').value = 0;
+  document.getElementById('qtyInput').value = 0;
+  document.getElementById('newItemForm').classList.add('show');
+  document.getElementById('niName').focus();
+}
+
+async function editStock(code){
+  const item = itemByCode(code);
+  if(!item) return;
+  const val = prompt('直接修改「' + item.name + '」目前庫存數量（人工校正，不會產生進出貨紀錄）：', item.stock);
+  if(val===null) return;
+  const n = parseInt(val);
+  if(isNaN(n) || n<0){ alert('請輸入有效的非負整數'); return; }
+  try{ await dbUpdateItemFields(item, {stock:n}); }catch(e){ alert('失敗：'+(e.message||e)); return; }
+  await refresh();
+}
+
+async function editSafety(code){
+  const item = itemByCode(code);
+  if(!item) return;
+  const val = prompt('設定「' + item.name + '」的安全庫存：', item.safety);
+  if(val===null) return;
+  const n = parseInt(val);
+  if(isNaN(n) || n<0){ alert('請輸入有效的非負整數'); return; }
+  try{ await dbUpdateItemFields(item, {safety:n}); }catch(e){ alert('失敗：'+(e.message||e)); return; }
+  await refresh();
+}
+
+async function editCode(code){
+  const item = itemByCode(code);
+  if(!item) return;
+  const val = prompt('輸入「' + item.name + '」實際的條碼編號：', item.placeholder ? '' : item.code);
+  if(val===null) return;
+  const newCode = val.trim();
+  if(!newCode){ alert('編號不可為空白'); return; }
+  if(newCode !== item.code && items.some(i=>i.code===newCode)){ alert('這個編號已經被其他教材使用了'); return; }
+  try{ await dbUpdateItemFields(item, {code:newCode, placeholder:false}); }catch(e){ alert('失敗：'+(e.message||e)); return; }
+  await refresh();
+}
+
+async function editPrice(code){
+  const item = itemByCode(code);
+  if(!item) return;
+  const cost = prompt('設定「' + item.name + '」的進貨價（成本）：', item.cost);
+  if(cost===null) return;
+  const sell = prompt('設定「' + item.name + '」的出貨價（售價）：', item.sell);
+  if(sell===null) return;
+  const c = parseFloat(cost), s = parseFloat(sell);
+  if(isNaN(c) || isNaN(s) || c<0 || s<0){ alert('請輸入有效的非負數字'); return; }
+  try{ await dbUpdateItemFields(item, {cost:c, sell:s}); }catch(e){ alert('失敗：'+(e.message||e)); return; }
+  await refresh();
+}
+
+async function deleteItem(code){
+  const item = itemByCode(code);
+  if(!item) return;
+  if(!confirm('確定要刪除教材「' + item.name + '」嗎？（不會刪除歷史紀錄）')) return;
+  try{ await dbDeleteItem(item); }catch(e){ alert('失敗：'+(e.message||e)); return; }
+  await refresh();
+}
+
+/* ---------- 作廢（回沖庫存）---------- */
+async function voidMove(id){
+  const m = moves.find(x=>x.id===id);
+  if(!m || m.voided) return;
+  if(!confirm('確定作廢這筆' + (m.type==='in'?'進貨':'出貨') + '？庫存會自動回沖。')) return;
+  try{
+    await dbAdjustStock(m.code, m.type==='in' ? -m.qty : m.qty);
+    await dbVoidMoves([id]);
+  }catch(e){ alert('作廢失敗：'+(e.message||e)); return; }
+  beep(true);
+  flash('已作廢並回沖庫存', true);
+  await refresh();
+}
+async function voidSale(saleId){
+  const lines = moves.filter(m=>m.sale_id===saleId && !m.voided);
+  if(lines.length===0) return;
+  if(!confirm('確定整單作廢？此單所有品項的庫存都會回補。')) return;
+  try{
+    for(const l of lines){ await dbAdjustStock(l.code, l.qty); }
+    await dbVoidMoves(lines.map(l=>l.id));
+  }catch(e){ alert('作廢失敗：'+(e.message||e)); return; }
+  beep(true);
+  flash('整單已作廢，庫存已回補', true);
+  await refresh();
+}
+
+function renderAll(){
+  renderStats();
+  renderItems();
+  renderMoves();
+  renderCart();
+}
+
+function renderStats(){
+  document.getElementById('statCount').textContent = items.length;
+  document.getElementById('statLow').textContent = items.filter(i=>i.stock < i.safety).length;
+  document.getElementById('statPlaceholder').textContent = items.filter(i=>i.placeholder).length;
+  document.getElementById('statValue').textContent = money(items.reduce((s,i)=>s + i.stock*i.cost, 0));
+
+  const now = new Date();
+  const today = now.toDateString();
+  const ym = now.getFullYear() + '-' + now.getMonth();
+  const live = moves.filter(m=>!m.voided);
+  document.getElementById('statToday').textContent = live.filter(m=>new Date(m.ts).toDateString()===today).length;
+  const monthOut = live.filter(m=>{
+    const d = new Date(m.ts);
+    return m.type==='out' && (d.getFullYear() + '-' + d.getMonth())===ym;
+  });
+  const revenue = monthOut.reduce((s,m)=>s + (m.subtotal||0), 0);
+  const profit = monthOut.reduce((s,m)=>s + ((m.subtotal||0) - (m.unit_cost||0)*m.qty), 0);
+  document.getElementById('statRevenue').textContent = money(revenue);
+  document.getElementById('statProfit').textContent = money(profit);
+}
+
+function renderItems(){
+  const wrap = document.getElementById('itemsTableWrap');
+  const q = (document.getElementById('searchBox').value||'').trim().toLowerCase();
+  const cat = document.getElementById('catFilter').value;
+  let list = items.slice().sort((a,b)=>a.name.localeCompare(b.name,'zh-Hant'));
+  if(q){
+    list = list.filter(i=> i.name.toLowerCase().includes(q) || i.code.toLowerCase().includes(q));
+  }
+  if(cat){
+    list = list.filter(i=>i.category===cat);
+  }
+  if(list.length===0){
+    wrap.innerHTML = '<div class="empty">尚無符合條件的教材，掃描條碼即可自動建立</div>';
+    return;
+  }
+  let html = '<table><thead><tr><th>編號</th><th>名稱</th><th>分類</th><th>庫存</th><th>安全庫存</th><th>進貨價</th><th>出貨價</th><th>小計庫存值</th><th>狀態</th><th>操作</th></tr></thead><tbody>';
+  for(const i of list){
+    const low = i.stock < i.safety;
+    const c = jesc(i.code);
+    html += '<tr class="' + (low?'low':'') + '">'
+      + '<td class="barcode-cell">' + escapeHtml(i.code) + (i.placeholder ? '<br><span class="badge low" style="margin-top:2px;">舊編號．待補條碼</span>' : '') + '</td>'
+      + '<td>' + escapeHtml(i.name) + '</td>'
+      + '<td><span class="catbadge">' + escapeHtml(i.category) + '</span></td>'
+      + '<td>' + i.stock + ' ' + escapeHtml(i.unit) + '</td>'
+      + '<td>' + i.safety + '</td>'
+      + '<td>' + money(i.cost) + '</td>'
+      + '<td>' + money(i.sell) + '</td>'
+      + '<td>' + money(i.stock * i.cost) + '</td>'
+      + '<td><span class="badge ' + (low?'low':'ok') + '">' + (low?'庫存不足':'正常') + '</span></td>'
+      + '<td>'
+        + '<button class="rowbtn" onclick="editCode(\'' + c + '\')">改編號</button>'
+        + '<button class="rowbtn" onclick="editStock(\'' + c + '\')">校正庫存</button>'
+        + '<button class="rowbtn" onclick="editSafety(\'' + c + '\')">安全值</button>'
+        + '<button class="rowbtn" onclick="editPrice(\'' + c + '\')">改價格</button>'
+        + '<button class="rowbtn" onclick="deleteItem(\'' + c + '\')">刪除</button>'
+      + '</td></tr>';
+  }
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+function renderMoves(){
+  const wrap = document.getElementById('logTableWrap');
+  if(moves.length===0){
+    wrap.innerHTML = '<div class="empty">尚無異動紀錄</div>';
+    return;
+  }
+  const groups = [], saleMap = {};
+  for(const m of moves){
+    if(m.type==='out' && m.sale_id){
+      if(!saleMap[m.sale_id]){
+        saleMap[m.sale_id] = {kind:'sale', sale_id:m.sale_id, ts:m.ts, note:m.note, lines:[]};
+        groups.push(saleMap[m.sale_id]);
+      }
+      saleMap[m.sale_id].lines.push(m);
+    } else {
+      groups.push({kind:'single', ts:m.ts, move:m});
+    }
+  }
+  groups.sort((a,b)=> new Date(b.ts) - new Date(a.ts));
+  const show = groups.slice(0, 60);
+  let html = '';
+  for(const g of show){
+    if(g.kind==='single'){
+      const m = g.move, vd = m.voided;
+      html += '<div class="logcard ' + (vd?'voided':'') + '">'
+        + '<div class="logtop">'
+          + '<span class="badge ' + (m.type==='in'?'ok':'low') + '">' + (m.type==='in'?'進貨':'出貨') + '</span>'
+          + '<span class="logtime">' + fmtTime(m.ts) + '</span>'
+          + (vd ? '<span class="voidmark">已作廢</span>' : '<button class="rowbtn" onclick="voidMove(\'' + jesc(m.id) + '\')">作廢</button>')
+        + '</div>'
+        + '<div class="logbody">' + escapeHtml(m.name) + ' <span class="barcode-cell">(' + escapeHtml(m.code) + ')</span> ×' + m.qty + ' @ ' + money(m.price) + ' = <b>' + money(m.subtotal) + '</b></div>'
+        + '</div>';
+    } else {
+      const allVoid = g.lines.every(l=>l.voided);
+      const liveLines = g.lines.filter(l=>!l.voided);
+      const total = liveLines.reduce((s,l)=>s+l.subtotal, 0);
+      const qtot = liveLines.reduce((s,l)=>s+l.qty, 0);
+      html += '<div class="logcard sale ' + (allVoid?'voided':'') + '">'
+        + '<div class="logtop">'
+          + '<span class="badge low">出貨單</span>'
+          + '<span class="logtime">' + fmtTime(g.ts) + '</span>'
+          + '<span class="salesum">' + g.lines.length + ' 項 / ' + qtot + ' 件 / <b>' + money(total) + '</b></span>'
+          + (allVoid ? '<span class="voidmark">已作廢</span>' : '<button class="rowbtn" onclick="voidSale(\'' + jesc(g.sale_id) + '\')">整單作廢</button>')
+        + '</div>'
+        + (g.note ? '<div class="salenote">備註：' + escapeHtml(g.note) + '</div>' : '')
+        + '<ul class="saleitems">'
+          + g.lines.map(l=>'<li' + (l.voided?' class="voided"':'') + '>' + escapeHtml(l.name) + ' <span class="barcode-cell">(' + escapeHtml(l.code) + ')</span> ×' + l.qty + ' @ ' + money(l.price) + ' = ' + money(l.subtotal) + '</li>').join('')
+        + '</ul>'
+        + '</div>';
+    }
+  }
+  wrap.innerHTML = html;
+}
+
+function downloadCSV(filename, rows){
+  const csv = rows.map(r=>r.map(c=>'"' + String(c).replace(/"/g,'""') + '"').join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function exportItemsCSV(){
+  const rows = [['編號','名稱','分類','單位','庫存','安全庫存','進貨價','出貨價','庫存總值']];
+  items.forEach(i=>rows.push([i.code,i.name,i.category,i.unit,i.stock,i.safety,i.cost,i.sell,i.stock*i.cost]));
+  downloadCSV('教材庫存.csv', rows);
+}
+
+function exportLogCSV(){
+  const rows = [['時間','類型','出貨單','編號','名稱','分類','數量','單價','小計','成本','備註','狀態']];
+  moves.forEach(m=>rows.push([
+    new Date(m.ts).toLocaleString('zh-TW'), m.type==='in'?'進貨':'出貨', m.sale_id||'',
+    m.code, m.name, m.category||'', m.qty, m.price||0, m.subtotal||0, m.unit_cost||0, m.note||'',
+    m.voided?'已作廢':'有效'
+  ]));
+  downloadCSV('進出貨紀錄.csv', rows);
+}
+
+function renderCart(){
+  const wrap = document.getElementById('cartWrap');
+  const cnt = document.getElementById('cartCount');
+  const btn = document.getElementById('checkoutBtn');
+  if(cart.length===0){
+    wrap.innerHTML = '<div class="empty">尚未加入任何教材 — 切到「出貨」模式後，掃描或輸入編號即可加入本次出貨單</div>';
+    cnt.textContent = '0';
+    document.getElementById('cartTotal').textContent = '$0';
+    btn.disabled = true;
+    return;
+  }
+  let total = 0, qtot = 0;
+  let html = '<table><thead><tr><th>編號</th><th>名稱</th><th>數量</th><th>單價</th><th>小計</th><th></th></tr></thead><tbody>';
+  for(const c of cart){
+    total += c.subtotal; qtot += c.qty;
+    const code = jesc(c.code);
+    html += '<tr>'
+      + '<td class="barcode-cell">' + escapeHtml(c.code) + '</td>'
+      + '<td>' + escapeHtml(c.name) + '</td>'
+      + '<td><input type="number" min="1" value="' + c.qty + '" style="width:64px" onchange="cartSetQty(\'' + code + '\', this.value)"></td>'
+      + '<td>' + money(c.price) + '</td>'
+      + '<td>' + money(c.subtotal) + '</td>'
+      + '<td><button class="rowbtn" onclick="cartRemove(\'' + code + '\')">移除</button></td>'
+      + '</tr>';
+  }
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+  cnt.textContent = qtot;
+  document.getElementById('cartTotal').textContent = money(total);
+  btn.disabled = false;
+}
+
+function exportBackup(){
+  const payload = {exportedAt:new Date().toISOString(), items, moves};
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = '教材備份_' + new Date().toISOString().slice(0,10) + '.json';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function importBackupFile(input){
+  const file = input.files[0];
+  if(!file) return;
+  if(cloudReady()){
+    alert('目前是雲端模式，還原會與雲端資料衝突。\n雲端資料以 Supabase 為準；此按鈕僅供「本機模式」還原備份。');
+    input.value = '';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try{
+      const d = JSON.parse(reader.result);
+      if(!Array.isArray(d.items)) throw new Error('檔案格式不符');
+      if(!confirm('這會覆蓋目前本機的庫存與紀錄，確定還原？')) { input.value=''; return; }
+      items = d.items; moves = Array.isArray(d.moves) ? d.moves : [];
+      saveLocalItems(); saveLocalMoves();
+      refresh();
+      flash('已還原備份', true);
+    }catch(e){ alert('匯入失敗：' + (e.message||e)); }
+    input.value = '';
+  };
+  reader.readAsText(file);
+}
+
+init();
+</script>
+</body>
+</html>
