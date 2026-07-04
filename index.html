@@ -5,18 +5,18 @@
 <title>序曲音樂學院｜教材庫存管理</title>
 <style>
   :root{
-    --ink:#112639;
-    --ink-soft:#566e81;
-    --paper:#faf5ec;
+    --ink:#263445;
+    --ink-soft:#64748b;
+    --paper:#f3f6f9;
     --card:#ffffff;
-    --line:#dde3e6;
-    --teal:#3f82a9;
-    --teal-deep:#112639;
-    --teal-bg:#e4eef3;
-    --amber:#b35417;
-    --amber-bg:#f6e2d1;
-    --red:#9c3b28;
-    --red-bg:#f5ddd2;
+    --line:#dde4ec;
+    --teal:#45688f;
+    --teal-deep:#2a3d55;
+    --teal-bg:#e7edf4;
+    --amber:#b06a45;
+    --amber-bg:#f1e4da;
+    --red:#a2564c;
+    --red-bg:#f2ddd8;
   }
   *{box-sizing:border-box;}
   body{
@@ -28,7 +28,7 @@
   }
   header{
     background:var(--teal-deep);
-    color:#f4efe2;
+    color:#eef3fb;
     padding:1.6rem 2rem;
   }
   header h1{
@@ -40,7 +40,7 @@
   header p{
     margin:.3rem 0 0;
     font-size:.85rem;
-    color:#bcd8ce;
+    color:#b4c2d3;
   }
   main{
     max-width:1080px;
@@ -326,9 +326,10 @@
     <div class="flash" id="flash"></div>
 
     <div class="newitem" id="newItemForm">
-      <div style="font-weight:700;color:#7a4c0d;">找不到這個編號 — 是否要建立新教材？</div>
+      <div style="font-weight:700;color:#7a4c0d;" id="niFormTitle">找不到這個條碼 — 是否要建立新教材？</div>
       <div class="grid">
-        <div><label>條碼／編號</label><input type="text" id="niCode" readonly></div>
+        <div><label>條碼編號</label><input type="text" id="niBarcode" placeholder="實體條碼（掃描會自動帶入）"></div>
+        <div><label>代號（選填）</label><input type="text" id="niCode" placeholder="舊代號，可留空"></div>
         <div><label>教材名稱 *</label><input type="text" id="niName" placeholder="例如：拜爾鋼琴教本(一)"></div>
         <div><label>分類</label>
           <select id="niCategory">
@@ -441,7 +442,8 @@ function money(n){ return '$' + Math.round(n||0).toLocaleString('zh-TW'); }
 function uuid(){ return (crypto.randomUUID ? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(16).slice(2)); }
 function jesc(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function itemByCode(code){ return items.find(i=>i.code===code); }
+function itemById(id){ return items.find(i=>i.id===id); }
+function itemByScan(v){ v = String(v||'').trim(); return items.find(i=> (i.barcode && i.barcode===v) || (i.code && i.code===v)); }
 function fmtTime(ts){ return new Date(ts).toLocaleString('zh-TW', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'}); }
 
 function flash(msg, ok){
@@ -543,7 +545,7 @@ async function dbLoadMoves(){
 }
 async function dbInsertItem(it){
   if(cloudReady()){ const {error} = await sb.from('items').insert(it); if(error) throw error; }
-  else { items.push(it); saveLocalItems(); }
+  else { if(!it.id) it.id = uuid(); items.push(it); saveLocalItems(); }
 }
 async function dbUpdateItemFields(it, fields){
   if(cloudReady()){ const {error} = await sb.from('items').update(fields).eq('id', it.id); if(error) throw error; }
@@ -551,11 +553,11 @@ async function dbUpdateItemFields(it, fields){
 }
 async function dbDeleteItem(it){
   if(cloudReady()){ const {error} = await sb.from('items').delete().eq('id', it.id); if(error) throw error; }
-  else { items = items.filter(x=>x.code!==it.code); saveLocalItems(); }
+  else { items = items.filter(x=>x.id!==it.id); saveLocalItems(); }
 }
-async function dbAdjustStock(code, delta){
-  if(cloudReady()){ const {error} = await sb.rpc('adjust_stock', {p_code:code, p_delta:delta}); if(error) throw error; }
-  else { const it = itemByCode(code); if(it) it.stock += delta; saveLocalItems(); }
+async function dbAdjustStock(id, delta){
+  if(cloudReady()){ const {error} = await sb.rpc('adjust_stock', {p_id:id, p_delta:delta}); if(error) throw error; }
+  else { const it = itemById(id); if(it) it.stock += delta; saveLocalItems(); }
 }
 async function dbInsertMoves(rows){
   if(cloudReady()){ const {error} = await sb.from('moves').insert(rows); if(error) throw error; }
@@ -571,7 +573,8 @@ function normalizeItem(i){
   i.sell = Number(i.sell) || 0;
   i.stock = Number(i.stock) || 0;
   i.safety = Number(i.safety) || 0;
-  i.placeholder = !!i.placeholder;
+  i.code = i.code || '';
+  i.barcode = i.barcode || '';
   if(!CATEGORIES.includes(i.category)) i.category = '其他';
 }
 
@@ -585,6 +588,7 @@ async function ensureSeed(){
       if(error) throw error;
     }
   } else {
+    seed.forEach(s=>{ if(!s.id) s.id = uuid(); });
     items = seed; saveLocalItems();
   }
 }
@@ -631,30 +635,37 @@ document.getElementById('barcodeInput').addEventListener('keydown', e=>{
   if(e.key==='Enter'){ e.preventDefault(); handleScan(); }
 });
 
-function makeMove(type, snap, qty, price, unitCost, saleId){
-  return { type, code:snap.code, name:snap.name, category:snap.category,
+function makeMove(type, item, qty, price, unitCost, saleId){
+  return { type, item_id:item.id||null, code:item.code||null, barcode:item.barcode||null,
+           name:item.name, category:item.category,
            qty, price, subtotal:Math.round(price*qty*100)/100,
            unit_cost:unitCost||0, sale_id:saleId||null, note:null, voided:false,
            ts:new Date().toISOString() };
 }
 
+function openNewItem(barcodePrefill){
+  document.getElementById('niFormTitle').textContent = '找不到這個條碼 — 是否要建立新教材？';
+  document.getElementById('niBarcode').value = barcodePrefill || '';
+  document.getElementById('niCode').value = '';
+  document.getElementById('niName').value = '';
+  document.getElementById('niStock').value = 0;
+  document.getElementById('newItemForm').classList.add('show');
+  document.getElementById('niName').focus();
+}
+
 async function handleScan(){
   const codeInput = document.getElementById('barcodeInput');
-  const code = codeInput.value.trim();
-  if(!code) return;
+  const scanned = codeInput.value.trim();
+  if(!scanned) return;
   const qty = Math.max(1, parseInt(document.getElementById('qtyInput').value) || 1);
   const priceRaw = document.getElementById('priceInput').value;
   const priceEntered = priceRaw !== '' ? Math.max(0, parseFloat(priceRaw)) : null;
 
-  const item = itemByCode(code);
+  const item = itemByScan(scanned);
   if(!item){
-    pendingCode = code;
-    document.getElementById('niCode').value = code;
-    document.getElementById('niName').value = '';
-    document.getElementById('newItemForm').classList.add('show');
-    document.getElementById('niName').focus();
+    openNewItem(scanned);
     beep(false);
-    flash('找不到編號 ' + code + '，請在下方建立新教材', false);
+    flash('找不到條碼／代號「' + scanned + '」，請在下方建立新教材', false);
     return;
   }
 
@@ -662,7 +673,7 @@ async function handleScan(){
     const unitPrice = priceEntered !== null ? priceEntered : item.cost;
     try{
       await dbUpdateItemFields(item, {cost:unitPrice});
-      await dbAdjustStock(code, qty);
+      await dbAdjustStock(item.id, qty);
       await dbInsertMoves([ makeMove('in', item, qty, unitPrice, unitPrice, null) ]);
     }catch(e){ beep(false); flash('進貨失敗：'+(e.message||e), false); return; }
     beep(true);
@@ -676,35 +687,35 @@ async function handleScan(){
 }
 
 /* ---------- 出貨購物車 ---------- */
-function cartQtyFor(code){ return cart.filter(c=>c.code===code).reduce((s,c)=>s+c.qty,0); }
+function cartQtyFor(id){ return cart.filter(c=>c.id===id).reduce((s,c)=>s+c.qty,0); }
 function addToCart(item, qty, priceEntered){
-  const avail = item.stock - cartQtyFor(item.code);
+  const avail = item.stock - cartQtyFor(item.id);
   if(avail < qty){
     beep(false);
     flash('庫存不足：' + item.name + ' 目前最多可再出 ' + Math.max(0, avail) + ' ' + item.unit, false);
     return;
   }
   const price = priceEntered !== null ? priceEntered : item.sell;
-  const ex = cart.find(c=>c.code===item.code);
+  const ex = cart.find(c=>c.id===item.id);
   if(ex){ ex.qty += qty; if(priceEntered !== null) ex.price = price; ex.subtotal = ex.qty*ex.price; }
-  else cart.push({code:item.code, name:item.name, unit:item.unit, category:item.category, qty, price, cost:item.cost, subtotal:qty*price});
+  else cart.push({id:item.id, code:item.code, barcode:item.barcode, name:item.name, unit:item.unit, category:item.category, qty, price, cost:item.cost, subtotal:qty*price});
   beep(true);
   renderCart();
   flash('已加入出貨清單：' + item.name + ' ×' + qty, true);
 }
-function cartSetQty(code, q){
-  const c = cart.find(x=>x.code===code);
+function cartSetQty(id, q){
+  const c = cart.find(x=>x.id===id);
   if(!c) return;
   q = Math.max(1, parseInt(q) || 1);
-  const item = itemByCode(code);
+  const item = itemById(id);
   if(item){
-    const others = cartQtyFor(code) - c.qty;
+    const others = cartQtyFor(id) - c.qty;
     if(q > item.stock - others){ flash('超過可出庫存，已調整為最大可出數量', false); q = Math.max(1, item.stock - others); }
   }
   c.qty = q; c.subtotal = c.qty*c.price;
   renderCart();
 }
-function cartRemove(code){ cart = cart.filter(c=>c.code!==code); renderCart(); }
+function cartRemove(id){ cart = cart.filter(c=>c.id!==id); renderCart(); }
 function cartClear(){ if(cart.length && !confirm('確定清空本次出貨清單？')) return; cart = []; renderCart(); }
 
 async function checkout(){
@@ -712,16 +723,16 @@ async function checkout(){
   const saleId = uuid();
   const note = (document.getElementById('saleNote').value || '').trim();
   const rows = cart.map(c=>{
-    const m = makeMove('out', {code:c.code, name:c.name, category:c.category}, c.qty, c.price, c.cost, saleId);
+    const m = makeMove('out', c, c.qty, c.price, c.cost, saleId);
     m.note = note || null;
     return m;
   });
   const total = cart.reduce((s,c)=>s+c.subtotal, 0);
   const n = cart.length;
   try{
-    for(const c of cart){ await dbAdjustStock(c.code, -c.qty); }
+    for(const c of cart){ await dbAdjustStock(c.id, -c.qty); }
     await dbInsertMoves(rows);
-    for(const c of cart){ const it = itemByCode(c.code); if(it) await dbUpdateItemFields(it, {sell:c.price}); }
+    for(const c of cart){ const it = itemById(c.id); if(it) await dbUpdateItemFields(it, {sell:c.price}); }
   }catch(e){ beep(false); flash('出貨失敗：'+(e.message||e), false); return; }
   beep(true);
   flash('出貨完成 ✓ 共 ' + n + ' 項 / ' + money(total), true);
@@ -740,6 +751,8 @@ function cancelNewItem(){
 async function saveNewItem(){
   const name = document.getElementById('niName').value.trim();
   if(!name){ alert('請輸入教材名稱'); return; }
+  const barcode = document.getElementById('niBarcode').value.trim();
+  const code = document.getElementById('niCode').value.trim();
   const category = document.getElementById('niCategory').value;
   const unit = document.getElementById('niUnit').value.trim() || '本';
   const initStock = Math.max(0, parseInt(document.getElementById('niStock').value) || 0);
@@ -750,23 +763,26 @@ async function saveNewItem(){
   const priceRaw = document.getElementById('priceInput').value;
   const priceEntered = priceRaw !== '' ? Math.max(0, parseFloat(priceRaw)) : null;
 
-  if(itemByCode(pendingCode)){ alert('編號 ' + pendingCode + ' 已存在'); return; }
-  const newItem = {code:pendingCode, name, category, unit, stock:initStock, safety, cost, sell, placeholder:false};
+  if(!barcode && !code){ alert('請至少輸入條碼編號（或代號），系統才能辨識這個教材'); return; }
+  if(barcode && items.some(i=>i.barcode===barcode)){ alert('條碼「' + barcode + '」已被其他教材使用'); return; }
+  if(code && items.some(i=>i.code===code)){ alert('代號「' + code + '」已被其他教材使用'); return; }
+
+  const newItem = {barcode: barcode || null, code: code || null, name, category, unit, stock:initStock, safety, cost, sell};
   try{ await dbInsertItem(newItem); }catch(e){ alert('建立失敗：'+(e.message||e)); return; }
   await refresh();
-  const created = itemByCode(pendingCode);
+  const created = items.find(i=> (newItem.id && i.id===newItem.id) || (barcode && i.barcode===barcode) || (code && i.code===code));
 
   if(qty > 0 && created){
     if(mode === 'in'){
       const unitPrice = priceEntered !== null ? priceEntered : cost;
       try{
         await dbUpdateItemFields(created, {cost:unitPrice});
-        await dbAdjustStock(created.code, qty);
+        await dbAdjustStock(created.id, qty);
         await dbInsertMoves([ makeMove('in', created, qty, unitPrice, unitPrice, null) ]);
       }catch(e){ flash('登記進貨失敗：'+(e.message||e), false); }
       await refresh();
     } else {
-      addToCart(itemByCode(pendingCode), qty, priceEntered);
+      addToCart(created, qty, priceEntered);
     }
   }
   document.getElementById('newItemForm').classList.remove('show');
@@ -779,18 +795,14 @@ async function saveNewItem(){
 }
 
 function openManualAdd(){
-  const code = 'M' + String(items.filter(i=>i.code.startsWith('M')).length + 1).padStart(4,'0');
-  pendingCode = code;
-  document.getElementById('niCode').value = code;
-  document.getElementById('niName').value = '';
-  document.getElementById('niStock').value = 0;
+  openNewItem('');
+  document.getElementById('niFormTitle').textContent = '手動新增教材';
   document.getElementById('qtyInput').value = 0;
-  document.getElementById('newItemForm').classList.add('show');
-  document.getElementById('niName').focus();
+  document.getElementById('niBarcode').focus();
 }
 
-async function editStock(code){
-  const item = itemByCode(code);
+async function editStock(id){
+  const item = itemById(id);
   if(!item) return;
   const val = prompt('直接修改「' + item.name + '」目前庫存數量（人工校正，不會產生進出貨紀錄）：', item.stock);
   if(val===null) return;
@@ -800,8 +812,8 @@ async function editStock(code){
   await refresh();
 }
 
-async function editSafety(code){
-  const item = itemByCode(code);
+async function editSafety(id){
+  const item = itemById(id);
   if(!item) return;
   const val = prompt('設定「' + item.name + '」的安全庫存：', item.safety);
   if(val===null) return;
@@ -811,20 +823,30 @@ async function editSafety(code){
   await refresh();
 }
 
-async function editCode(code){
-  const item = itemByCode(code);
+async function editCode(id){
+  const item = itemById(id);
   if(!item) return;
-  const val = prompt('輸入「' + item.name + '」實際的條碼編號：', item.placeholder ? '' : item.code);
+  const val = prompt('設定「' + item.name + '」的代號（舊書籍代號，可留空）：', item.code || '');
   if(val===null) return;
-  const newCode = val.trim();
-  if(!newCode){ alert('編號不可為空白'); return; }
-  if(newCode !== item.code && items.some(i=>i.code===newCode)){ alert('這個編號已經被其他教材使用了'); return; }
-  try{ await dbUpdateItemFields(item, {code:newCode, placeholder:false}); }catch(e){ alert('失敗：'+(e.message||e)); return; }
+  const nc = val.trim();
+  if(nc && nc !== item.code && items.some(i=>i.code===nc)){ alert('代號「'+nc+'」已被其他教材使用'); return; }
+  try{ await dbUpdateItemFields(item, {code: nc || null}); }catch(e){ alert('失敗：'+(e.message||e)); return; }
   await refresh();
 }
 
-async function editPrice(code){
-  const item = itemByCode(code);
+async function editBarcode(id){
+  const item = itemById(id);
+  if(!item) return;
+  const val = prompt('設定「' + item.name + '」的條碼編號（可用條碼機掃描或手動輸入；可留空）：', item.barcode || '');
+  if(val===null) return;
+  const nb = val.trim();
+  if(nb && nb !== item.barcode && items.some(i=>i.barcode===nb)){ alert('條碼「'+nb+'」已被其他教材使用'); return; }
+  try{ await dbUpdateItemFields(item, {barcode: nb || null}); }catch(e){ alert('失敗：'+(e.message||e)); return; }
+  await refresh();
+}
+
+async function editPrice(id){
+  const item = itemById(id);
   if(!item) return;
   const cost = prompt('設定「' + item.name + '」的進貨價（成本）：', item.cost);
   if(cost===null) return;
@@ -836,8 +858,8 @@ async function editPrice(code){
   await refresh();
 }
 
-async function deleteItem(code){
-  const item = itemByCode(code);
+async function deleteItem(id){
+  const item = itemById(id);
   if(!item) return;
   if(!confirm('確定要刪除教材「' + item.name + '」嗎？（不會刪除歷史紀錄）')) return;
   try{ await dbDeleteItem(item); }catch(e){ alert('失敗：'+(e.message||e)); return; }
@@ -850,7 +872,8 @@ async function voidMove(id){
   if(!m || m.voided) return;
   if(!confirm('確定作廢這筆' + (m.type==='in'?'進貨':'出貨') + '？庫存會自動回沖。')) return;
   try{
-    await dbAdjustStock(m.code, m.type==='in' ? -m.qty : m.qty);
+    const tid = m.item_id || (itemByScan(m.barcode||m.code)||{}).id;
+    if(tid) await dbAdjustStock(tid, m.type==='in' ? -m.qty : m.qty);
     await dbVoidMoves([id]);
   }catch(e){ alert('作廢失敗：'+(e.message||e)); return; }
   beep(true);
@@ -862,7 +885,7 @@ async function voidSale(saleId){
   if(lines.length===0) return;
   if(!confirm('確定整單作廢？此單所有品項的庫存都會回補。')) return;
   try{
-    for(const l of lines){ await dbAdjustStock(l.code, l.qty); }
+    for(const l of lines){ const tid = l.item_id || (itemByScan(l.barcode||l.code)||{}).id; if(tid) await dbAdjustStock(tid, l.qty); }
     await dbVoidMoves(lines.map(l=>l.id));
   }catch(e){ alert('作廢失敗：'+(e.message||e)); return; }
   beep(true);
@@ -880,7 +903,7 @@ function renderAll(){
 function renderStats(){
   document.getElementById('statCount').textContent = items.length;
   document.getElementById('statLow').textContent = items.filter(i=>i.stock < i.safety).length;
-  document.getElementById('statPlaceholder').textContent = items.filter(i=>i.placeholder).length;
+  document.getElementById('statPlaceholder').textContent = items.filter(i=>!i.barcode).length;
   document.getElementById('statValue').textContent = money(items.reduce((s,i)=>s + i.stock*i.cost, 0));
 
   const now = new Date();
@@ -904,7 +927,9 @@ function renderItems(){
   const cat = document.getElementById('catFilter').value;
   let list = items.slice().sort((a,b)=>a.name.localeCompare(b.name,'zh-Hant'));
   if(q){
-    list = list.filter(i=> i.name.toLowerCase().includes(q) || i.code.toLowerCase().includes(q));
+    list = list.filter(i=> i.name.toLowerCase().includes(q)
+      || (i.code && i.code.toLowerCase().includes(q))
+      || (i.barcode && i.barcode.toLowerCase().includes(q)));
   }
   if(cat){
     list = list.filter(i=>i.category===cat);
@@ -913,12 +938,16 @@ function renderItems(){
     wrap.innerHTML = '<div class="empty">尚無符合條件的教材，掃描條碼即可自動建立</div>';
     return;
   }
-  let html = '<table><thead><tr><th>編號</th><th>名稱</th><th>分類</th><th>庫存</th><th>安全庫存</th><th>進貨價</th><th>出貨價</th><th>小計庫存值</th><th>狀態</th><th>操作</th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th>代號</th><th>條碼</th><th>名稱</th><th>分類</th><th>庫存</th><th>安全庫存</th><th>進貨價</th><th>出貨價</th><th>小計庫存值</th><th>狀態</th><th>操作</th></tr></thead><tbody>';
   for(const i of list){
     const low = i.stock < i.safety;
-    const c = jesc(i.code);
+    const id = jesc(i.id);
+    const barcodeCell = i.barcode
+      ? escapeHtml(i.barcode)
+      : '<span class="badge low">待補條碼</span>';
     html += '<tr class="' + (low?'low':'') + '">'
-      + '<td class="barcode-cell">' + escapeHtml(i.code) + (i.placeholder ? '<br><span class="badge low" style="margin-top:2px;">舊編號．待補條碼</span>' : '') + '</td>'
+      + '<td class="barcode-cell">' + (i.code ? escapeHtml(i.code) : '<span style="color:var(--ink-soft)">—</span>') + '</td>'
+      + '<td class="barcode-cell">' + barcodeCell + '</td>'
       + '<td>' + escapeHtml(i.name) + '</td>'
       + '<td><span class="catbadge">' + escapeHtml(i.category) + '</span></td>'
       + '<td>' + i.stock + ' ' + escapeHtml(i.unit) + '</td>'
@@ -928,11 +957,12 @@ function renderItems(){
       + '<td>' + money(i.stock * i.cost) + '</td>'
       + '<td><span class="badge ' + (low?'low':'ok') + '">' + (low?'庫存不足':'正常') + '</span></td>'
       + '<td>'
-        + '<button class="rowbtn" onclick="editCode(\'' + c + '\')">改編號</button>'
-        + '<button class="rowbtn" onclick="editStock(\'' + c + '\')">校正庫存</button>'
-        + '<button class="rowbtn" onclick="editSafety(\'' + c + '\')">安全值</button>'
-        + '<button class="rowbtn" onclick="editPrice(\'' + c + '\')">改價格</button>'
-        + '<button class="rowbtn" onclick="deleteItem(\'' + c + '\')">刪除</button>'
+        + '<button class="rowbtn" onclick="editBarcode(\'' + id + '\')">設定條碼</button>'
+        + '<button class="rowbtn" onclick="editCode(\'' + id + '\')">改代號</button>'
+        + '<button class="rowbtn" onclick="editStock(\'' + id + '\')">校正庫存</button>'
+        + '<button class="rowbtn" onclick="editSafety(\'' + id + '\')">安全值</button>'
+        + '<button class="rowbtn" onclick="editPrice(\'' + id + '\')">改價格</button>'
+        + '<button class="rowbtn" onclick="deleteItem(\'' + id + '\')">刪除</button>'
       + '</td></tr>';
   }
   html += '</tbody></table>';
@@ -969,7 +999,7 @@ function renderMoves(){
           + '<span class="logtime">' + fmtTime(m.ts) + '</span>'
           + (vd ? '<span class="voidmark">已作廢</span>' : '<button class="rowbtn" onclick="voidMove(\'' + jesc(m.id) + '\')">作廢</button>')
         + '</div>'
-        + '<div class="logbody">' + escapeHtml(m.name) + ' <span class="barcode-cell">(' + escapeHtml(m.code) + ')</span> ×' + m.qty + ' @ ' + money(m.price) + ' = <b>' + money(m.subtotal) + '</b></div>'
+        + '<div class="logbody">' + escapeHtml(m.name) + ' <span class="barcode-cell">(' + escapeHtml(m.barcode||m.code||'—') + ')</span> ×' + m.qty + ' @ ' + money(m.price) + ' = <b>' + money(m.subtotal) + '</b></div>'
         + '</div>';
     } else {
       const allVoid = g.lines.every(l=>l.voided);
@@ -985,7 +1015,7 @@ function renderMoves(){
         + '</div>'
         + (g.note ? '<div class="salenote">備註：' + escapeHtml(g.note) + '</div>' : '')
         + '<ul class="saleitems">'
-          + g.lines.map(l=>'<li' + (l.voided?' class="voided"':'') + '>' + escapeHtml(l.name) + ' <span class="barcode-cell">(' + escapeHtml(l.code) + ')</span> ×' + l.qty + ' @ ' + money(l.price) + ' = ' + money(l.subtotal) + '</li>').join('')
+          + g.lines.map(l=>'<li' + (l.voided?' class="voided"':'') + '>' + escapeHtml(l.name) + ' <span class="barcode-cell">(' + escapeHtml(l.barcode||l.code||'—') + ')</span> ×' + l.qty + ' @ ' + money(l.price) + ' = ' + money(l.subtotal) + '</li>').join('')
         + '</ul>'
         + '</div>';
     }
@@ -1004,16 +1034,16 @@ function downloadCSV(filename, rows){
 }
 
 function exportItemsCSV(){
-  const rows = [['編號','名稱','分類','單位','庫存','安全庫存','進貨價','出貨價','庫存總值']];
-  items.forEach(i=>rows.push([i.code,i.name,i.category,i.unit,i.stock,i.safety,i.cost,i.sell,i.stock*i.cost]));
+  const rows = [['代號','條碼','名稱','分類','單位','庫存','安全庫存','進貨價','出貨價','庫存總值']];
+  items.forEach(i=>rows.push([i.code||'',i.barcode||'',i.name,i.category,i.unit,i.stock,i.safety,i.cost,i.sell,i.stock*i.cost]));
   downloadCSV('教材庫存.csv', rows);
 }
 
 function exportLogCSV(){
-  const rows = [['時間','類型','出貨單','編號','名稱','分類','數量','單價','小計','成本','備註','狀態']];
+  const rows = [['時間','類型','出貨單','代號','條碼','名稱','分類','數量','單價','小計','成本','備註','狀態']];
   moves.forEach(m=>rows.push([
     new Date(m.ts).toLocaleString('zh-TW'), m.type==='in'?'進貨':'出貨', m.sale_id||'',
-    m.code, m.name, m.category||'', m.qty, m.price||0, m.subtotal||0, m.unit_cost||0, m.note||'',
+    m.code||'', m.barcode||'', m.name, m.category||'', m.qty, m.price||0, m.subtotal||0, m.unit_cost||0, m.note||'',
     m.voided?'已作廢':'有效'
   ]));
   downloadCSV('進出貨紀錄.csv', rows);
