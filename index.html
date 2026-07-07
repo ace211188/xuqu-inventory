@@ -300,6 +300,7 @@
   <div class="stats">
     <div class="stat"><div class="num" id="statCount">0</div><div class="lbl">教材種類</div></div>
     <div class="stat warn clickable" onclick="showLowStock()" title="點我看是哪些教材庫存不足"><div class="num" id="statLow">0</div><div class="lbl">庫存不足項目 ›</div></div>
+    <div class="stat clickable" onclick="openOrders()" title="點我開啟訂購清單"><div class="num" id="statOrders">0</div><div class="lbl">訂購清單 ›</div></div>
     <div class="stat"><div class="num" id="statToday">0</div><div class="lbl">今日進出貨筆數</div></div>
     <div class="stat"><div class="num" id="statValue">$0</div><div class="lbl">目前庫存總值（依進貨價）</div></div>
     <div class="stat"><div class="num" id="statRevenue">$0</div><div class="lbl">本月營收（出貨）</div></div>
@@ -389,7 +390,7 @@
       <div class="scan-row" style="margin-top:.7rem;">
         <div class="scan-field" style="flex:1;min-width:180px;">
           <span class="fieldlbl">清點掃描</span>
-          <input type="text" id="stInput" placeholder="掃描或輸入條碼／代號，每次 +1">
+          <input type="text" id="stInput" placeholder="掃描條碼，或輸入代號／名稱（每次 +1）">
         </div>
         <div class="scan-field" style="justify-content:flex-end;">
           <span class="fieldlbl">&nbsp;</span>
@@ -473,6 +474,33 @@
   </div>
 </div>
 
+<div class="modal" id="ordersModal">
+  <div class="modal-box" style="max-width:680px;">
+    <h3>訂購清單（補貨叫貨）</h3>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:.3rem 0 .8rem;">
+      <button class="btn-ghost" onclick="addLowStockToOrders()">帶入庫存不足</button>
+      <button class="btn-ghost" onclick="printOrders()">列印訂購單</button>
+    </div>
+    <div class="scan-row">
+      <div class="scan-field" style="flex:1;min-width:180px;">
+        <span class="fieldlbl">手動加入</span>
+        <input type="text" id="orderInput" placeholder="掃描、輸入條碼／代號，或打教材名稱">
+      </div>
+      <div class="scan-field" style="justify-content:flex-end;">
+        <span class="fieldlbl">&nbsp;</span>
+        <button onclick="orderAddManual()">加入清單</button>
+      </div>
+    </div>
+    <div class="tablewrap" id="orderWrap" style="margin-top:.8rem;max-height:44vh;overflow:auto;"></div>
+    <div class="hint" style="margin-top:.6rem;">「帶入庫存不足」會帶入低於安全庫存的教材並預估建議量；也可手動加購。調整數量、勾「已訂購」，按「列印訂購單」印給供應商；到貨後用上方「進貨」掃描入庫。</div>
+    <div class="modal-actions">
+      <span class="hint" id="orderSummary" style="margin:0;flex:1;min-width:120px;text-align:left;"></span>
+      <button class="ghost" onclick="orderClearOrdered()">清除已訂購</button>
+      <button class="primary" onclick="closeOrders()">關閉</button>
+    </div>
+  </div>
+</div>
+
 <script>
 let items = [];
 let moves = [];
@@ -482,11 +510,14 @@ let cart = [];
 let stList = [];
 let stContinuous = false;
 let _stDebounce = null;
+let orders = [];
+let ordersUseCloud = false;
 let sb = null;
 let rtChannel = null;
 
 const ITEMS_KEY = 'materials-items';
 const MOVES_KEY = 'materials-moves';
+const ORDERS_KEY = 'materials-orders';
 const CFG_KEY = 'materials-supabase-cfg';
 const CATEGORIES = ['鋼琴','爵士鼓','小提琴','長笛','樂理','教具','檢定','其他'];
 const SEED_ITEMS = []; /* 雲端已初始化，網頁版不內建種子資料 */
@@ -596,6 +627,8 @@ function showLowStock(){
   document.getElementById('lowStockModal').classList.add('show');
 }
 function closeLowStock(){ document.getElementById('lowStockModal').classList.remove('show'); }
+function openOrders(){ renderOrders(); document.getElementById('ordersModal').classList.add('show'); setTimeout(()=>{ const el=document.getElementById('orderInput'); if(el) el.focus(); }, 50); }
+function closeOrders(){ document.getElementById('ordersModal').classList.remove('show'); }
 
 /* ---------- 清點庫存（實地盤點）---------- */
 function toggleStocktake(){
@@ -614,15 +647,16 @@ function stFlash(msg, ok){
 function stToggleContinuous(cb){
   stContinuous = cb.checked;
   const input = document.getElementById('stInput');
-  input.placeholder = stContinuous ? '連續掃描中… 掃一本自動加一本' : '掃描或輸入條碼／代號，每次 +1';
+  input.placeholder = stContinuous ? '連續掃描中… 掃一本自動加一本' : '掃描條碼，或輸入代號／名稱（每次 +1）';
   input.focus();
 }
 function stScan(){
   const input = document.getElementById('stInput');
   const v = input.value.trim();
   if(!v) return;
-  const item = itemByScan(v);
-  if(!item){ beep(false); stFlash('找不到條碼／代號「' + v + '」，請先建立此教材再清點', false); input.value=''; input.focus(); return; }
+  let item = itemByScan(v);
+  if(!item && !stContinuous){ const lv = v.toLowerCase(); item = items.find(i=>i.name.toLowerCase()===lv) || items.find(i=>i.name.toLowerCase().includes(lv)); }
+  if(!item){ beep(false); stFlash('找不到「' + v + '」，可輸入條碼／代號／名稱；沒有條碼的教材直接打名稱即可', false); input.value=''; input.focus(); return; }
   const ex = stList.find(s=>s.id===item.id);
   if(ex){ ex.counted += 1; }
   else stList.push({id:item.id, name:item.name, code:item.code, barcode:item.barcode, unit:item.unit, sys:item.stock, counted:1});
@@ -688,6 +722,40 @@ async function stApply(){
 /* ---------- 資料存取層（雲端 Supabase / 本機 localStorage 雙模式）---------- */
 function saveLocalItems(){ localStorage.setItem(ITEMS_KEY, JSON.stringify(items)); }
 function saveLocalMoves(){ localStorage.setItem(MOVES_KEY, JSON.stringify(moves)); }
+function saveLocalOrders(){ localStorage.setItem(ORDERS_KEY, JSON.stringify(orders)); }
+
+async function dbLoadOrders(){
+  if(cloudReady()){
+    const {data, error} = await sb.from('order_items').select('*').order('created_at');
+    if(!error){ ordersUseCloud = true; return data || []; }
+    ordersUseCloud = false;   // 雲端沒有 order_items 表 → 自動退回本機儲存
+  } else {
+    ordersUseCloud = false;
+  }
+  try{ return JSON.parse(localStorage.getItem(ORDERS_KEY)) || []; }catch(e){ return []; }
+}
+function ordersOnCloud(){ return cloudReady() && ordersUseCloud; }
+async function orderInsert(item, qty){
+  const row = {item_id:item.id, code:item.code||null, barcode:item.barcode||null, name:item.name, qty, ordered:false, note:null};
+  if(ordersOnCloud()){
+    const {data, error} = await sb.from('order_items').insert(row).select();
+    if(error) throw error;
+    orders.push((data && data[0]) || row);
+  } else {
+    row.id = uuid(); orders.push(row); saveLocalOrders();
+  }
+}
+async function orderUpdate(id, fields){
+  const o = orders.find(x=>x.id===id);
+  if(o) Object.assign(o, fields);
+  if(ordersOnCloud()){ const {error} = await sb.from('order_items').update(fields).eq('id', id); if(error) throw error; }
+  else saveLocalOrders();
+}
+async function orderDelete(id){
+  orders = orders.filter(o=>o.id!==id);
+  if(ordersOnCloud()){ const {error} = await sb.from('order_items').delete().eq('id', id); if(error) throw error; }
+  else saveLocalOrders();
+}
 
 async function dbLoadItems(){
   if(cloudReady()){
@@ -764,6 +832,7 @@ function subscribeRealtime(){
   rtChannel = sb.channel('materials-rt')
     .on('postgres_changes', {event:'*', schema:'public', table:'items'}, scheduleRefresh)
     .on('postgres_changes', {event:'*', schema:'public', table:'moves'}, scheduleRefresh)
+    .on('postgres_changes', {event:'*', schema:'public', table:'order_items'}, scheduleRefresh)
     .subscribe();
 }
 
@@ -772,6 +841,7 @@ async function refresh(){
     items = await dbLoadItems();
     items.forEach(normalizeItem);
     moves = await dbLoadMoves();
+    try{ orders = await dbLoadOrders(); }catch(e){ orders = []; }
     renderAll();
   }catch(e){ flash('讀取資料失敗：'+(e.message||e), false); }
 }
@@ -803,6 +873,9 @@ document.getElementById('stInput').addEventListener('input', ()=>{
   if(!stContinuous) return;
   clearTimeout(_stDebounce);
   _stDebounce = setTimeout(()=>{ if(document.getElementById('stInput').value.trim()) stScan(); }, 140);
+});
+document.getElementById('orderInput').addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ e.preventDefault(); orderAddManual(); }
 });
 
 function makeMove(type, item, qty, price, unitCost, saleId){
@@ -1093,17 +1166,125 @@ function printSale(saleId){
   w.document.open(); w.document.write(html); w.document.close();
 }
 
+/* ---------- 訂購清單（補貨叫貨）---------- */
+async function addLowStockToOrders(){
+  const low = items.filter(i=>i.stock < i.safety);
+  const existing = new Set(orders.map(o=>o.item_id));
+  const toAdd = low.filter(i=>!existing.has(i.id));
+  if(toAdd.length === 0){ flash(low.length ? '庫存不足的教材都已在訂購清單中' : '目前沒有庫存不足的教材', true); return; }
+  try{
+    for(const i of toAdd){ const target = Math.max(1, (i.safety||1)*2 - i.stock); await orderInsert(i, target); }
+  }catch(e){ flash('帶入失敗：'+(e.message||e), false); return; }
+  renderOrders();
+  flash('已帶入 ' + toAdd.length + ' 項庫存不足的教材（建議訂購量已預估）', true);
+}
+async function orderAddManual(){
+  const input = document.getElementById('orderInput');
+  const v = input.value.trim();
+  if(!v) return;
+  let item = itemByScan(v);
+  if(!item){ const lv = v.toLowerCase(); item = items.find(i=>i.name.toLowerCase()===lv) || items.find(i=>i.name.toLowerCase().includes(lv)); }
+  if(!item){ beep(false); flash('找不到教材「' + v + '」', false); return; }
+  if(orders.some(o=>o.item_id===item.id)){ flash('「' + item.name + '」已在訂購清單中', true); input.value=''; input.focus(); return; }
+  try{ await orderInsert(item, 1); }catch(e){ beep(false); flash('加入失敗：'+(e.message||e), false); return; }
+  beep(true); renderOrders();
+  input.value=''; input.focus();
+  flash('已加入訂購清單：' + item.name, true);
+}
+async function orderSetQty(id, v){
+  const q = Math.max(1, parseInt(v) || 1);
+  try{ await orderUpdate(id, {qty:q}); }catch(e){ flash('更新失敗：'+(e.message||e), false); }
+  renderOrders();
+}
+async function orderToggleOrdered(id, checked){
+  try{ await orderUpdate(id, {ordered: !!checked}); }catch(e){ flash('更新失敗：'+(e.message||e), false); }
+  renderOrders();
+}
+async function orderRemove(id){
+  try{ await orderDelete(id); }catch(e){ flash('刪除失敗：'+(e.message||e), false); }
+  renderOrders();
+}
+async function orderClearOrdered(){
+  const done = orders.filter(o=>o.ordered);
+  if(done.length === 0){ flash('目前沒有標記「已訂購」的項目', true); return; }
+  if(!confirm('確定清除 ' + done.length + ' 項已標記「已訂購」的項目？')) return;
+  try{ for(const o of done){ await orderDelete(o.id); } }catch(e){ flash('清除失敗：'+(e.message||e), false); }
+  renderOrders();
+  flash('已清除 ' + done.length + ' 項', true);
+}
+function renderOrders(){
+  const so = document.getElementById('statOrders');
+  if(so) so.textContent = orders.filter(o=>!o.ordered).length;
+  const wrap = document.getElementById('orderWrap');
+  const summary = document.getElementById('orderSummary');
+  if(!wrap) return;
+  if(orders.length === 0){
+    wrap.innerHTML = '<div class="empty">訂購清單是空的 — 按「帶入庫存不足」或在上方掃描／搜尋手動加入</div>';
+    summary.textContent = '';
+    return;
+  }
+  let pending = 0;
+  let html = '<table><thead><tr><th>名稱</th><th>條碼／代號</th><th>目前庫存</th><th>安全</th><th>訂購量</th><th>已訂購</th><th></th></tr></thead><tbody>';
+  for(const o of orders){
+    const it = itemById(o.item_id);
+    const stock = it ? it.stock : '—';
+    const safety = it ? it.safety : '—';
+    const low = it && it.stock < it.safety;
+    if(!o.ordered) pending++;
+    const id = jesc(o.id);
+    html += '<tr' + (o.ordered ? ' style="opacity:.5"' : '') + '>'
+      + '<td>' + escapeHtml(o.name) + '</td>'
+      + '<td class="barcode-cell">' + escapeHtml(o.barcode || o.code || '—') + '</td>'
+      + '<td' + (low ? ' style="color:var(--red);font-weight:700"' : '') + '>' + stock + '</td>'
+      + '<td>' + safety + '</td>'
+      + '<td><input type="number" min="1" value="' + o.qty + '" style="width:64px" onchange="orderSetQty(\'' + id + '\', this.value)"></td>'
+      + '<td style="text-align:center"><input type="checkbox" ' + (o.ordered ? 'checked' : '') + ' onchange="orderToggleOrdered(\'' + id + '\', this.checked)"></td>'
+      + '<td><button class="rowbtn" onclick="orderRemove(\'' + id + '\')">移除</button></td>'
+      + '</tr>';
+  }
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+  summary.textContent = '共 ' + orders.length + ' 項，其中 ' + pending + ' 項待訂購';
+}
+function printOrders(){
+  const list = orders.filter(o=>!o.ordered);
+  if(list.length === 0){ alert('沒有待訂購的項目可列印（清單為空或都已標記已訂購）'); return; }
+  const dt = new Date().toLocaleString('zh-TW');
+  const totalQ = list.reduce((s,o)=>s+o.qty, 0);
+  const rows = list.map(o=>'<tr><td>' + escapeHtml(o.name) + '</td><td>' + escapeHtml(o.barcode || o.code || '') + '</td><td class="c">' + o.qty + '</td></tr>').join('');
+  const html = '<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="utf-8"><title>訂購單</title>'
+    + '<style>*{box-sizing:border-box}body{font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;color:#1a2330;max-width:520px;margin:0 auto;padding:24px}'
+    + 'h1{font-size:20px;margin:0 0 2px}.sub{color:#667;font-size:13px;margin-bottom:16px}'
+    + '.meta{font-size:13px;color:#334;margin-bottom:12px}'
+    + 'table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:8px 6px;border-bottom:1px solid #ddd;text-align:left}'
+    + 'th{font-size:12px;color:#667}td.c,th.c{text-align:center}'
+    + 'tfoot td{border-top:2px solid #333;border-bottom:none;font-weight:700;font-size:15px;padding-top:10px}'
+    + '.foot{margin-top:26px;font-size:12px;color:#889;text-align:center}@media print{body{padding:0}}</style></head><body>'
+    + '<h1>序曲音樂學院</h1><div class="sub">教材訂購單</div>'
+    + '<div class="meta">日期：' + escapeHtml(dt) + '</div>'
+    + '<table><thead><tr><th>教材名稱</th><th>條碼／代號</th><th class="c">訂購量</th></tr></thead>'
+    + '<tbody>' + rows + '</tbody>'
+    + '<tfoot><tr><td>合計品項 ' + list.length + '</td><td></td><td class="c">' + totalQ + '</td></tr></tfoot></table>'
+    + '<div class="foot">序曲音樂學院 教材訂購單</div>'
+    + '<scr' + 'ipt>window.onload=function(){window.print();}</scr' + 'ipt></body></html>';
+  const w = window.open('', '_blank', 'width=600,height=760');
+  if(!w){ alert('瀏覽器阻擋了列印視窗，請允許彈出視窗後再試一次'); return; }
+  w.document.open(); w.document.write(html); w.document.close();
+}
+
 function renderAll(){
   renderStats();
   renderItems();
   renderMoves();
   renderCart();
+  renderOrders();
 }
 
 function renderStats(){
   document.getElementById('statCount').textContent = items.length;
   document.getElementById('statLow').textContent = items.filter(i=>i.stock < i.safety).length;
   document.getElementById('statPlaceholder').textContent = items.filter(i=>!i.barcode).length;
+  document.getElementById('statOrders').textContent = orders.filter(o=>!o.ordered).length;
   document.getElementById('statValue').textContent = money(items.reduce((s,i)=>s + i.stock*i.cost, 0));
 
   const now = new Date();
