@@ -251,7 +251,11 @@
   /* 異動紀錄卡片 */
   .logcard{border:1px solid var(--line);border-radius:10px;padding:.6rem .8rem;margin-bottom:.6rem;background:#fff;}
   .logcard.sale{border-left:4px solid var(--amber);}
+  .logcard.stocktake{border-left:4px solid var(--teal);background:var(--teal-bg);}
   .logcard.voided{opacity:.5;}
+  .logmonth{font-size:.82rem;font-weight:700;color:var(--teal-deep);background:var(--teal-bg);border-radius:6px;padding:.3rem .7rem;margin:.9rem 0 .5rem;}
+  .logmonth:first-child{margin-top:0;}
+  .badge.adjust{background:var(--teal-deep);color:#fff;}
   .logtop{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
   .logtime{font-size:.8rem;color:var(--ink-soft);}
   .logbody{margin-top:.35rem;font-size:.88rem;}
@@ -647,8 +651,8 @@ function stScan(){
   if(!item){ const lv = v.toLowerCase(); item = items.find(i=>i.name.toLowerCase()===lv) || items.find(i=>i.name.toLowerCase().includes(lv)); }
   if(!item){ beep(false); stFlash('找不到「' + v + '」，可輸入條碼／代號／名稱；沒有條碼的教材直接打名稱即可', false); input.value=''; input.focus(); return; }
   const ex = stList.find(s=>s.id===item.id);
-  if(ex){ ex.counted += 1; }
-  else stList.push({id:item.id, name:item.name, code:item.code, barcode:item.barcode, unit:item.unit, sys:item.stock, counted:1});
+  if(ex){ ex.counted += 1; stList = stList.filter(s=>s.id!==item.id); stList.unshift(ex); }
+  else stList.unshift({id:item.id, name:item.name, code:item.code, barcode:item.barcode, unit:item.unit, sys:item.stock, counted:1});
   beep(true);
   renderStocktake();
   input.value=''; input.focus();
@@ -695,14 +699,25 @@ function renderStocktake(){
 }
 async function stApply(){
   if(stList.length === 0) return;
+  const totalCounted = stList.length;
   const changes = stList.filter(s=>{ const it = itemById(s.id); return it && it.stock !== s.counted; });
   if(changes.length === 0){ stFlash('清點結果與系統庫存一致，無需調整', true); return; }
   if(!confirm('將把 ' + changes.length + ' 項教材的庫存更新為實際清點數量（人工校正，不產生進出貨紀錄）。確定套用？')) return;
+  // 先算好差異明細（用套用前的系統庫存）
+  const detail = changes.map(s=>{ const it = itemById(s.id); return {name:s.name, from:it.stock, to:s.counted, delta:s.counted - it.stock}; });
+  const net = detail.reduce((a,d)=>a + d.delta, 0);
+  const up = detail.filter(d=>d.delta>0).reduce((a,d)=>a + d.delta, 0);
+  const down = detail.filter(d=>d.delta<0).reduce((a,d)=>a - d.delta, 0);
   try{
     for(const s of changes){ const it = itemById(s.id); if(it) await dbUpdateItemFields(it, {stock: s.counted}); }
+    const noteLines = detail.map(d=>d.name + ' ' + d.from + '→' + d.to + '(' + (d.delta>0?'+':'') + d.delta + ')').join('、');
+    const noteText = '盤點校正：共清點 ' + totalCounted + ' 項，' + changes.length + ' 項有差異，淨變動 ' + (net>0?'+':'') + net + '（增 ' + up + ' / 減 ' + down + '）\n明細：' + noteLines;
+    await dbInsertMoves([{ type:'in', item_id:null, code:null, barcode:null,
+      name:'清點盤點校正', category:'清點', qty:changes.length, price:0, subtotal:0,
+      unit_cost:0, sale_id:'STK-'+Date.now(), note:noteText, voided:false, ts:new Date().toISOString() }]);
   }catch(e){ beep(false); stFlash('套用失敗：' + (e.message||e), false); return; }
   beep(true);
-  stFlash('已套用清點結果，更新了 ' + changes.length + ' 項庫存', true);
+  stFlash('已套用清點結果，更新了 ' + changes.length + ' 項庫存，已記錄於異動紀錄', true);
   stList = [];
   renderStocktake();
   await refresh();
@@ -1274,7 +1289,7 @@ function renderStats(){
   const now = new Date();
   const today = now.toDateString();
   const ym = now.getFullYear() + '-' + now.getMonth();
-  const live = moves.filter(m=>!m.voided);
+  const live = moves.filter(m=>!m.voided && !(m.sale_id && String(m.sale_id).startsWith('STK-')));
   document.getElementById('statToday').textContent = live.filter(m=>new Date(m.ts).toDateString()===today).length;
   const monthOut = live.filter(m=>{
     const d = new Date(m.ts);
@@ -1342,7 +1357,9 @@ function renderMoves(){
   }
   const groups = [], saleMap = {};
   for(const m of moves){
-    if(m.type==='out' && m.sale_id){
+    if(m.sale_id && String(m.sale_id).startsWith('STK-')){
+      groups.push({kind:'stocktake', ts:m.ts, move:m});
+    } else if(m.type==='out' && m.sale_id){
       if(!saleMap[m.sale_id]){
         saleMap[m.sale_id] = {kind:'sale', sale_id:m.sale_id, ts:m.ts, note:m.note, lines:[]};
         groups.push(saleMap[m.sale_id]);
@@ -1355,7 +1372,27 @@ function renderMoves(){
   groups.sort((a,b)=> new Date(b.ts) - new Date(a.ts));
   const show = groups.slice(0, 60);
   let html = '';
+  let curYM = '';
   for(const g of show){
+    const d = new Date(g.ts);
+    const ym = d.getFullYear() + '-' + (d.getMonth()+1);
+    if(ym !== curYM){
+      curYM = ym;
+      html += '<div class="logmonth">' + d.getFullYear() + ' 年 ' + (d.getMonth()+1) + ' 月</div>';
+    }
+    if(g.kind==='stocktake'){
+      const m = g.move;
+      const noteHtml = escapeHtml(m.note || ('盤點校正：' + m.qty + ' 項有差異')).replace(/\n/g, '<br>');
+      html += '<div class="logcard stocktake">'
+        + '<div class="logtop">'
+          + '<span class="badge adjust">盤點校正</span>'
+          + '<span class="logtime">' + fmtTime(m.ts) + '</span>'
+          + '<span class="salesum">' + m.qty + ' 項差異</span>'
+        + '</div>'
+        + '<div class="logbody">' + noteHtml + '</div>'
+        + '</div>';
+      continue;
+    }
     if(g.kind==='single'){
       const m = g.move, vd = m.voided;
       html += '<div class="logcard ' + (vd?'voided':'') + '">'
