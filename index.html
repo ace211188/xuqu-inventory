@@ -397,9 +397,6 @@
           <button onclick="stScan()">加入清點</button>
         </div>
       </div>
-      <label style="display:inline-flex;align-items:center;gap:6px;font-size:.85rem;color:var(--ink-soft);margin-top:.6rem;cursor:pointer;">
-        <input type="checkbox" id="stContinuous" onchange="stToggleContinuous(this)" style="width:16px;height:16px;"> 連續掃描模式（掃到自動加入，免按 Enter，可一直掃）
-      </label>
       <div class="flash" id="stFlash"></div>
       <div class="tablewrap" id="stWrap" style="margin-top:.8rem;"></div>
       <div class="cart-actions">
@@ -508,8 +505,6 @@ let mode = 'in';
 let pendingCode = '';
 let cart = [];
 let stList = [];
-let stContinuous = false;
-let _stDebounce = null;
 let orders = [];
 let ordersUseCloud = false;
 let sb = null;
@@ -644,18 +639,12 @@ function stFlash(msg, ok){
   clearTimeout(window._stFlashTimer);
   window._stFlashTimer = setTimeout(()=>{ f.className='flash'; }, 3000);
 }
-function stToggleContinuous(cb){
-  stContinuous = cb.checked;
-  const input = document.getElementById('stInput');
-  input.placeholder = stContinuous ? '連續掃描中… 掃一本自動加一本' : '掃描條碼，或輸入代號／名稱（每次 +1）';
-  input.focus();
-}
 function stScan(){
   const input = document.getElementById('stInput');
   const v = input.value.trim();
   if(!v) return;
   let item = itemByScan(v);
-  if(!item && !stContinuous){ const lv = v.toLowerCase(); item = items.find(i=>i.name.toLowerCase()===lv) || items.find(i=>i.name.toLowerCase().includes(lv)); }
+  if(!item){ const lv = v.toLowerCase(); item = items.find(i=>i.name.toLowerCase()===lv) || items.find(i=>i.name.toLowerCase().includes(lv)); }
   if(!item){ beep(false); stFlash('找不到「' + v + '」，可輸入條碼／代號／名稱；沒有條碼的教材直接打名稱即可', false); input.value=''; input.focus(); return; }
   const ex = stList.find(s=>s.id===item.id);
   if(ex){ ex.counted += 1; }
@@ -867,12 +856,7 @@ document.getElementById('barcodeInput').addEventListener('keydown', e=>{
   if(e.key==='Enter'){ e.preventDefault(); handleScan(); }
 });
 document.getElementById('stInput').addEventListener('keydown', e=>{
-  if(e.key==='Enter'){ e.preventDefault(); clearTimeout(_stDebounce); stScan(); }
-});
-document.getElementById('stInput').addEventListener('input', ()=>{
-  if(!stContinuous) return;
-  clearTimeout(_stDebounce);
-  _stDebounce = setTimeout(()=>{ if(document.getElementById('stInput').value.trim()) stScan(); }, 140);
+  if(e.key==='Enter'){ e.preventDefault(); stScan(); }
 });
 document.getElementById('orderInput').addEventListener('keydown', e=>{
   if(e.key==='Enter'){ e.preventDefault(); orderAddManual(); }
