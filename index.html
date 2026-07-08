@@ -251,6 +251,7 @@
   /* 異動紀錄卡片 */
   .logcard{border:1px solid var(--line);border-radius:10px;padding:.6rem .8rem;margin-bottom:.6rem;background:#fff;}
   .logcard.sale{border-left:4px solid var(--amber);}
+  .logcard.inbatch{border-left:4px solid var(--teal);}
   .logcard.stocktake{border-left:4px solid var(--teal);background:var(--teal-bg);}
   .logcard.voided{opacity:.5;}
   .logmonth{font-size:.82rem;font-weight:700;color:var(--teal-deep);background:var(--teal-bg);border-radius:6px;padding:.3rem .7rem;margin:.9rem 0 .5rem;}
@@ -291,6 +292,7 @@
   .lowstock{font-size:.82rem;color:var(--red);white-space:nowrap;}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 </head>
 <body>
 
@@ -373,7 +375,7 @@
 
   <div class="panel" id="cartPanel">
     <div class="cart-head">
-      <h2 style="margin:0;">本次出貨清單（<span id="cartCount">0</span> 件）</h2>
+      <h2 style="margin:0;"><span id="cartTitle">本次進貨清單</span>（<span id="cartCount">0</span> 件）</h2>
       <div class="cart-total">合計 <span id="cartTotal">$0</span></div>
     </div>
     <div class="tablewrap" id="cartWrap"></div>
@@ -428,6 +430,7 @@
         <option value="其他">其他</option>
       </select>
       <button onclick="openManualAdd()">+ 手動新增教材</button>
+      <button onclick="openBarcodeTool()">🏷 條碼標籤</button>
       <button onclick="exportItemsCSV()">匯出庫存 CSV</button>
       <button onclick="exportBackup()">匯出備份 JSON</button>
       <button onclick="document.getElementById('importFile').click()">還原備份</button>
@@ -499,6 +502,30 @@
       <span class="hint" id="orderSummary" style="margin:0;flex:1;min-width:120px;text-align:left;"></span>
       <button class="ghost" onclick="orderClearOrdered()">清除已訂購</button>
       <button class="primary" onclick="closeOrders()">關閉</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="barcodeModal">
+  <div class="modal-box" style="max-width:720px;">
+    <h3>條碼標籤（給沒有條碼的書）</h3>
+    <p>沒有實體條碼的書，可在這裡產生一組「內部條碼」並列印貼上。內部條碼會存進系統當作這本書的條碼，之後掃描就能直接辨識。同一本書要印幾張就填數量（例如架上有 5 本就印 5 張）。以後同一本書再叫貨，來這裡找到它、直接再列印即可。標籤會自動排版在 A4 內。</p>
+    <div class="scan-row">
+      <div class="scan-field" style="flex:1;min-width:180px;">
+        <span class="fieldlbl">搜尋書名／代號</span>
+        <input type="text" id="bcSearch" placeholder="打書名或代號找書" oninput="renderBarcodeList()">
+      </div>
+      <div class="scan-field" style="justify-content:flex-end;">
+        <span class="fieldlbl">&nbsp;</span>
+        <label style="display:inline-flex;align-items:center;gap:6px;font-size:.85rem;color:var(--ink-soft);cursor:pointer;white-space:nowrap;">
+          <input type="checkbox" id="bcOnlyNoBarcode" checked onchange="renderBarcodeList()" style="width:16px;height:16px;"> 只顯示沒有條碼的書
+        </label>
+      </div>
+    </div>
+    <div class="tablewrap" id="barcodeWrap" style="margin-top:.8rem;max-height:48vh;overflow:auto;"></div>
+    <div class="modal-actions">
+      <span class="hint" id="bcSummary" style="margin:0;flex:1;min-width:120px;text-align:left;"></span>
+      <button class="primary" onclick="closeBarcodeTool()">關閉</button>
     </div>
   </div>
 </div>
@@ -629,6 +656,99 @@ function showLowStock(){
 function closeLowStock(){ document.getElementById('lowStockModal').classList.remove('show'); }
 function openOrders(){ renderOrders(); document.getElementById('ordersModal').classList.add('show'); setTimeout(()=>{ const el=document.getElementById('orderInput'); if(el) el.focus(); }, 50); }
 function closeOrders(){ document.getElementById('ordersModal').classList.remove('show'); }
+
+/* ---------- 條碼標籤（給沒有條碼的書產生內部條碼並列印）---------- */
+function openBarcodeTool(){ renderBarcodeList(); document.getElementById('barcodeModal').classList.add('show'); setTimeout(()=>{ const el=document.getElementById('bcSearch'); if(el) el.focus(); }, 50); }
+function closeBarcodeTool(){ document.getElementById('barcodeModal').classList.remove('show'); }
+function nextInternalBarcode(){
+  let max = 0;
+  items.forEach(i=>{ const m = /^SF(\d+)$/.exec(i.barcode||''); if(m){ const n = parseInt(m[1]); if(n>max) max = n; } });
+  return 'SF' + String(max+1).padStart(5, '0');
+}
+function renderBarcodeList(){
+  const wrap = document.getElementById('barcodeWrap');
+  const summary = document.getElementById('bcSummary');
+  const q = (document.getElementById('bcSearch').value||'').trim().toLowerCase();
+  const onlyNo = document.getElementById('bcOnlyNoBarcode').checked;
+  let list = items.slice();
+  if(onlyNo) list = list.filter(i=>!i.barcode);
+  if(q) list = list.filter(i=> i.name.toLowerCase().includes(q) || (i.code&&i.code.toLowerCase().includes(q)) || (i.barcode&&i.barcode.toLowerCase().includes(q)));
+  list.sort((a,b)=>a.name.localeCompare(b.name,'zh-Hant'));
+  const noBarcodeTotal = items.filter(i=>!i.barcode).length;
+  summary.textContent = '目前沒有條碼的書共 ' + noBarcodeTotal + ' 本';
+  if(list.length===0){ wrap.innerHTML = '<div class="empty">沒有符合的書</div>'; return; }
+  let html = '<table><thead><tr><th>名稱</th><th>代號</th><th>目前條碼</th><th>庫存</th><th>要印幾張</th><th></th></tr></thead><tbody>';
+  for(const i of list){
+    const id = jesc(i.id);
+    const bc = i.barcode ? ('<span class="barcode-cell">'+escapeHtml(i.barcode)+'</span>') : '<span class="badge low">無</span>';
+    const btnLabel = i.barcode ? '列印標籤' : '產生條碼並列印';
+    html += '<tr>'
+      + '<td>' + escapeHtml(i.name) + '</td>'
+      + '<td class="barcode-cell">' + (i.code?escapeHtml(i.code):'—') + '</td>'
+      + '<td>' + bc + '</td>'
+      + '<td>' + i.stock + ' ' + escapeHtml(i.unit) + '</td>'
+      + '<td><input type="number" min="1" value="' + Math.max(1, i.stock) + '" style="width:64px" id="bcQty-' + i.id + '"></td>'
+      + '<td><button class="rowbtn" onclick="assignAndPrintLabels(\'' + id + '\')">' + btnLabel + '</button></td>'
+      + '</tr>';
+  }
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+async function assignAndPrintLabels(id){
+  const item = itemById(id);
+  if(!item) return;
+  if(typeof JsBarcode === 'undefined'){ alert('條碼元件尚未載入完成，請稍等幾秒或檢查網路後再試一次'); return; }
+  const qtyEl = document.getElementById('bcQty-' + id);
+  const qty = Math.max(1, parseInt(qtyEl && qtyEl.value) || 1);
+  if(!item.barcode){
+    const nb = nextInternalBarcode();
+    if(!confirm('「' + item.name + '」目前沒有條碼。\n將產生內部條碼 ' + nb + ' 並存進系統當作它的條碼，然後列印 ' + qty + ' 張標籤。\n確定？')) return;
+    try{ await dbUpdateItemFields(item, {barcode: nb}); }catch(e){ alert('存檔失敗：'+(e.message||e)); return; }
+    await refresh();
+    renderBarcodeList();
+  }
+  const fresh = itemById(id);
+  printLabelsFor(fresh, qty);
+}
+function barcodeSVGString(value){
+  try{
+    const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    JsBarcode(svg, value, {format:'CODE128', width:2, height:45, displayValue:true, fontSize:13, margin:2});
+    return new XMLSerializer().serializeToString(svg);
+  }catch(e){ return '<div style="font-family:monospace">' + escapeHtml(value) + '</div>'; }
+}
+function printLabelsFor(item, qty){
+  if(!item || !item.barcode) return;
+  const svg = barcodeSVGString(item.barcode);
+  let labels = '';
+  for(let k=0;k<qty;k++){
+    labels += '<div class="label">'
+      + '<div class="lname">' + escapeHtml(item.name) + '</div>'
+      + '<div class="lcode">' + (item.code?escapeHtml(item.code):'') + '</div>'
+      + '<div class="lbc">' + svg + '</div>'
+      + '</div>';
+  }
+  const html = '<!doctype html><html><head><meta charset="utf-8"><title>條碼標籤 - ' + escapeHtml(item.name) + '</title>'
+    + '<style>'
+    + '@page{size:A4;margin:8mm;}'
+    + '*{box-sizing:border-box;} body{margin:0;font-family:"Microsoft JhengHei","PingFang TC",sans-serif;}'
+    + '.sheet{display:flex;flex-wrap:wrap;gap:2mm;}'
+    + '.label{width:63mm;height:34mm;border:1px dashed #bbb;border-radius:2mm;padding:2mm;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;page-break-inside:avoid;}'
+    + '.lname{font-size:11pt;font-weight:700;text-align:center;line-height:1.15;max-height:2.6em;overflow:hidden;}'
+    + '.lcode{font-size:8pt;color:#555;margin:1mm 0;}'
+    + '.lbc svg{max-width:58mm;height:auto;}'
+    + '.hint{width:100%;font-size:9pt;color:#888;margin-bottom:3mm;}'
+    + '@media print{.hint{display:none;} .label{border-color:#ddd;}}'
+    + '</style></head><body>'
+    + '<div class="hint">共 ' + qty + ' 張標籤（' + escapeHtml(item.name) + '，條碼 ' + escapeHtml(item.barcode) + '）— 虛線為裁切參考線，列印前可先預覽。</div>'
+    + '<div class="sheet">' + labels + '</div>'
+    + '<script>window.onload=function(){setTimeout(function(){window.print();},200);}<\/script>'
+    + '</body></html>';
+  const w = window.open('', '_blank');
+  if(!w){ alert('瀏覽器阻擋了列印視窗，請允許彈出視窗後再試一次'); return; }
+  w.document.open(); w.document.write(html); w.document.close();
+  flash('已開啟 ' + qty + ' 張「' + item.name + '」的條碼標籤列印視窗', true);
+}
 
 /* ---------- 清點庫存（實地盤點）---------- */
 function toggleStocktake(){
@@ -857,15 +977,25 @@ async function init(){
   try{ await ensureSeed(); }catch(e){ flash('初始化失敗：'+(e.message||e), false); }
   subscribeRealtime();
   await refresh();
+  setMode('in');
   document.getElementById('barcodeInput').focus();
 }
 
 function setMode(m){
+  if(m!==mode && cart.length && !confirm('切換模式會清空目前尚未' + (mode==='in'?'確認進貨':'結帳') + '的清單，確定切換？')){
+    document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active', b.dataset.mode===mode));
+    return;
+  }
+  if(m!==mode) cart = [];
   mode = m;
   document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active', b.dataset.mode===m));
   document.getElementById('priceLbl').textContent = m==='in' ? '本次進貨單價' : '本次售價';
-  document.getElementById('scanBtn').textContent = m==='in' ? '確認進貨' : '加入購物車';
-  document.getElementById('cartPanel').style.display = m==='out' ? 'block' : 'none';
+  document.getElementById('scanBtn').textContent = m==='in' ? '加入進貨清單' : '加入購物車';
+  document.getElementById('cartTitle').textContent = m==='in' ? '本次進貨清單' : '本次出貨清單';
+  document.getElementById('checkoutBtn').textContent = m==='in' ? '確認進貨（一次入庫）' : '結帳出貨';
+  document.getElementById('saleNote').placeholder = m==='in' ? '備註（選填，例如廠商／叫貨單說明）' : '備註（選填，例如學生名／訂單說明）';
+  document.getElementById('cartPanel').style.display = 'block';
+  renderCart();
   document.getElementById('barcodeInput').focus();
 }
 
@@ -913,46 +1043,35 @@ async function handleScan(){
     return;
   }
 
-  if(mode === 'in'){
-    const unitPrice = priceEntered !== null ? priceEntered : item.cost;
-    try{
-      await dbUpdateItemFields(item, {cost:unitPrice});
-      await dbAdjustStock(item.id, qty);
-      await dbInsertMoves([ makeMove('in', item, qty, unitPrice, unitPrice, null) ]);
-    }catch(e){ beep(false); flash('進貨失敗：'+(e.message||e), false); return; }
-    beep(true);
-    flash('已進貨 ' + qty + ' ' + item.unit + '，單價 ' + money(unitPrice) + ' — ' + item.name, true);
-    codeInput.value=''; document.getElementById('priceInput').value=''; codeInput.focus();
-    await refresh();
-  } else {
-    addToCart(item, qty, priceEntered);
-    codeInput.value=''; document.getElementById('priceInput').value=''; codeInput.focus();
-  }
+  addToCart(item, qty, priceEntered);
+  codeInput.value=''; document.getElementById('priceInput').value=''; codeInput.focus();
 }
 
 /* ---------- 出貨購物車 ---------- */
 function cartQtyFor(id){ return cart.filter(c=>c.id===id).reduce((s,c)=>s+c.qty,0); }
 function addToCart(item, qty, priceEntered){
-  const avail = item.stock - cartQtyFor(item.id);
-  if(avail < qty){
-    beep(false);
-    flash('庫存不足：' + item.name + ' 目前最多可再出 ' + Math.max(0, avail) + ' ' + item.unit, false);
-    return;
+  if(mode === 'out'){
+    const avail = item.stock - cartQtyFor(item.id);
+    if(avail < qty){
+      beep(false);
+      flash('庫存不足：' + item.name + ' 目前最多可再出 ' + Math.max(0, avail) + ' ' + item.unit, false);
+      return;
+    }
   }
-  const price = priceEntered !== null ? priceEntered : item.sell;
+  const price = priceEntered !== null ? priceEntered : (mode==='in' ? item.cost : item.sell);
   const ex = cart.find(c=>c.id===item.id);
   if(ex){ ex.qty += qty; if(priceEntered !== null) ex.price = price; ex.subtotal = ex.qty*ex.price; }
   else cart.push({id:item.id, code:item.code, barcode:item.barcode, name:item.name, unit:item.unit, category:item.category, qty, price, cost:item.cost, subtotal:qty*price});
   beep(true);
   renderCart();
-  flash('已加入出貨清單：' + item.name + ' ×' + qty, true);
+  flash('已加入' + (mode==='in'?'進貨':'出貨') + '清單：' + item.name + ' ×' + qty, true);
 }
 function cartSetQty(id, q){
   const c = cart.find(x=>x.id===id);
   if(!c) return;
   q = Math.max(1, parseInt(q) || 1);
   const item = itemById(id);
-  if(item){
+  if(item && mode==='out'){
     const others = cartQtyFor(id) - c.qty;
     if(q > item.stock - others){ flash('超過可出庫存，已調整為最大可出數量', false); q = Math.max(1, item.stock - others); }
   }
@@ -960,26 +1079,34 @@ function cartSetQty(id, q){
   renderCart();
 }
 function cartRemove(id){ cart = cart.filter(c=>c.id!==id); renderCart(); }
-function cartClear(){ if(cart.length && !confirm('確定清空本次出貨清單？')) return; cart = []; renderCart(); }
+function cartClear(){ if(cart.length && !confirm('確定清空本次' + (mode==='in'?'進貨':'出貨') + '清單？')) return; cart = []; renderCart(); }
 
 async function checkout(){
   if(cart.length === 0) return;
-  const saleId = uuid();
   const note = (document.getElementById('saleNote').value || '').trim();
-  const rows = cart.map(c=>{
-    const m = makeMove('out', c, c.qty, c.price, c.cost, saleId);
-    m.note = note || null;
-    return m;
-  });
   const total = cart.reduce((s,c)=>s+c.subtotal, 0);
   const n = cart.length;
-  try{
-    for(const c of cart){ await dbAdjustStock(c.id, -c.qty); }
-    await dbInsertMoves(rows);
-    for(const c of cart){ const it = itemById(c.id); if(it) await dbUpdateItemFields(it, {sell:c.price}); }
-  }catch(e){ beep(false); flash('出貨失敗：'+(e.message||e), false); return; }
-  beep(true);
-  flash('出貨完成 ✓ 共 ' + n + ' 項 / ' + money(total), true);
+  if(mode === 'in'){
+    const batchId = 'IN-' + Date.now();
+    const rows = cart.map(c=>{ const m = makeMove('in', c, c.qty, c.price, c.price, batchId); m.note = note || null; return m; });
+    try{
+      for(const c of cart){ const it = itemById(c.id); if(it) await dbUpdateItemFields(it, {cost:c.price}); }
+      for(const c of cart){ await dbAdjustStock(c.id, c.qty); }
+      await dbInsertMoves(rows);
+    }catch(e){ beep(false); flash('進貨失敗：'+(e.message||e), false); return; }
+    beep(true);
+    flash('進貨完成 ✓ 共 ' + n + ' 項 / ' + money(total) + '（記為一筆進貨單）', true);
+  } else {
+    const saleId = uuid();
+    const rows = cart.map(c=>{ const m = makeMove('out', c, c.qty, c.price, c.cost, saleId); m.note = note || null; return m; });
+    try{
+      for(const c of cart){ await dbAdjustStock(c.id, -c.qty); }
+      await dbInsertMoves(rows);
+      for(const c of cart){ const it = itemById(c.id); if(it) await dbUpdateItemFields(it, {sell:c.price}); }
+    }catch(e){ beep(false); flash('出貨失敗：'+(e.message||e), false); return; }
+    beep(true);
+    flash('出貨完成 ✓ 共 ' + n + ' 項 / ' + money(total), true);
+  }
   cart = [];
   document.getElementById('saleNote').value = '';
   renderCart();
@@ -1144,16 +1271,18 @@ async function undoStocktake(id){
   flash('已整筆復原這次清點，庫存已回到清點前', true);
   await refresh();
 }
-async function voidSale(saleId){
-  const lines = moves.filter(m=>m.sale_id===saleId && !m.voided);
+async function voidBatch(batchId){
+  const lines = moves.filter(m=>m.sale_id===batchId && !m.voided);
   if(lines.length===0) return;
-  if(!confirm('確定整單作廢？此單所有品項的庫存都會回補。')) return;
+  const isIn = lines[0].type==='in';
+  if(!confirm(isIn ? '確定整批作廢這張進貨單？此單進的庫存都會扣回。' : '確定整單作廢？此單所有品項的庫存都會回補。')) return;
   try{
-    for(const l of lines){ const tid = l.item_id || (itemByScan(l.barcode||l.code)||{}).id; if(tid) await dbAdjustStock(tid, l.qty); }
+    // 進貨作廢 → 扣回庫存(-qty)；出貨作廢 → 回補庫存(+qty)
+    for(const l of lines){ const tid = l.item_id || (itemByScan(l.barcode||l.code)||{}).id; if(tid) await dbAdjustStock(tid, l.type==='in' ? -l.qty : l.qty); }
     await dbVoidMoves(lines.map(l=>l.id));
   }catch(e){ alert('作廢失敗：'+(e.message||e)); return; }
   beep(true);
-  flash('整單已作廢，庫存已回補', true);
+  flash(isIn ? '整批進貨已作廢，庫存已扣回' : '整單已作廢，庫存已回補', true);
   await refresh();
 }
 
@@ -1381,9 +1510,9 @@ function renderMoves(){
   for(const m of moves){
     if(m.sale_id && String(m.sale_id).startsWith('STK-')){
       groups.push({kind:'stocktake', ts:m.ts, move:m});
-    } else if(m.type==='out' && m.sale_id){
+    } else if(m.sale_id){
       if(!saleMap[m.sale_id]){
-        saleMap[m.sale_id] = {kind:'sale', sale_id:m.sale_id, ts:m.ts, note:m.note, lines:[]};
+        saleMap[m.sale_id] = {kind:'batch', batchType:m.type, sale_id:m.sale_id, ts:m.ts, note:m.note, lines:[]};
         groups.push(saleMap[m.sale_id]);
       }
       saleMap[m.sale_id].lines.push(m);
@@ -1434,16 +1563,21 @@ function renderMoves(){
         + '<div class="logbody">' + escapeHtml(m.name) + ' <span class="barcode-cell">(' + escapeHtml(m.barcode||m.code||'—') + ')</span> ×' + m.qty + ' @ ' + money(m.price) + ' = <b>' + money(m.subtotal) + '</b></div>'
         + '</div>';
     } else {
+      const isIn = g.batchType==='in';
       const allVoid = g.lines.every(l=>l.voided);
       const liveLines = g.lines.filter(l=>!l.voided);
       const total = liveLines.reduce((s,l)=>s+l.subtotal, 0);
       const qtot = liveLines.reduce((s,l)=>s+l.qty, 0);
-      html += '<div class="logcard sale ' + (allVoid?'voided':'') + '">'
+      let actions;
+      if(allVoid){ actions = '<span class="voidmark">已作廢</span>'; }
+      else if(isIn){ actions = '<button class="rowbtn" onclick="voidBatch(\'' + jesc(g.sale_id) + '\')">整批作廢</button>'; }
+      else { actions = '<button class="rowbtn" onclick="printSale(\'' + jesc(g.sale_id) + '\')">列印</button><button class="rowbtn" onclick="voidBatch(\'' + jesc(g.sale_id) + '\')">整單作廢</button>'; }
+      html += '<div class="logcard ' + (isIn?'inbatch':'sale') + ' ' + (allVoid?'voided':'') + '">'
         + '<div class="logtop">'
-          + '<span class="badge low">出貨單</span>'
+          + '<span class="badge ' + (isIn?'ok':'low') + '">' + (isIn?'進貨單':'出貨單') + '</span>'
           + '<span class="logtime">' + fmtTime(g.ts) + '</span>'
           + '<span class="salesum">' + g.lines.length + ' 項 / ' + qtot + ' 件 / <b>' + money(total) + '</b></span>'
-          + (allVoid ? '<span class="voidmark">已作廢</span>' : '<button class="rowbtn" onclick="printSale(\'' + jesc(g.sale_id) + '\')">列印</button><button class="rowbtn" onclick="voidSale(\'' + jesc(g.sale_id) + '\')">整單作廢</button>')
+          + actions
         + '</div>'
         + (g.note ? '<div class="salenote">備註：' + escapeHtml(g.note) + '</div>' : '')
         + '<ul class="saleitems">'
@@ -1493,7 +1627,7 @@ function renderCart(){
   const cnt = document.getElementById('cartCount');
   const btn = document.getElementById('checkoutBtn');
   if(cart.length===0){
-    wrap.innerHTML = '<div class="empty">尚未加入任何教材 — 切到「出貨」模式後，掃描或輸入編號即可加入本次出貨單</div>';
+    wrap.innerHTML = '<div class="empty">尚未加入任何教材 — 掃描或輸入編號即可加入本次' + (mode==='in'?'進貨':'出貨') + '單，全部掃完再按下方按鈕一次' + (mode==='in'?'入庫':'結帳') + '</div>';
     cnt.textContent = '0';
     document.getElementById('cartTotal').textContent = '$0';
     btn.disabled = true;
