@@ -256,6 +256,7 @@
   .logmonth{font-size:.82rem;font-weight:700;color:var(--teal-deep);background:var(--teal-bg);border-radius:6px;padding:.3rem .7rem;margin:.9rem 0 .5rem;}
   .logmonth:first-child{margin-top:0;}
   .badge.adjust{background:var(--teal-deep);color:#fff;}
+  .stdetail{margin-top:.3rem;font-size:.82rem;color:var(--ink-soft);line-height:1.5;}
   .logtop{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
   .logtime{font-size:.8rem;color:var(--ink-soft);}
   .logbody{margin-top:.35rem;font-size:.88rem;}
@@ -704,17 +705,18 @@ async function stApply(){
   if(changes.length === 0){ stFlash('清點結果與系統庫存一致，無需調整', true); return; }
   if(!confirm('將把 ' + changes.length + ' 項教材的庫存更新為實際清點數量（人工校正，不產生進出貨紀錄）。確定套用？')) return;
   // 先算好差異明細（用套用前的系統庫存）
-  const detail = changes.map(s=>{ const it = itemById(s.id); return {name:s.name, from:it.stock, to:s.counted, delta:s.counted - it.stock}; });
+  const detail = changes.map(s=>{ const it = itemById(s.id); return {id:s.id, name:s.name, from:it.stock, to:s.counted, delta:s.counted - it.stock}; });
   const net = detail.reduce((a,d)=>a + d.delta, 0);
   const up = detail.filter(d=>d.delta>0).reduce((a,d)=>a + d.delta, 0);
   const down = detail.filter(d=>d.delta<0).reduce((a,d)=>a - d.delta, 0);
   try{
     for(const s of changes){ const it = itemById(s.id); if(it) await dbUpdateItemFields(it, {stock: s.counted}); }
-    const noteLines = detail.map(d=>d.name + ' ' + d.from + '→' + d.to + '(' + (d.delta>0?'+':'') + d.delta + ')').join('、');
-    const noteText = '盤點校正：共清點 ' + totalCounted + ' 項，' + changes.length + ' 項有差異，淨變動 ' + (net>0?'+':'') + net + '（增 ' + up + ' / 減 ' + down + '）\n明細：' + noteLines;
+    const summary = '共清點 ' + totalCounted + ' 項，' + changes.length + ' 項有差異，淨變動 ' + (net>0?'+':'') + net + '（增 ' + up + ' / 減 ' + down + '）';
+    // note 存結構化 JSON，供顯示明細與「整筆復原」使用
+    const noteObj = { t:'stocktake', summary:summary, detail:detail.map(d=>({id:d.id, name:d.name, from:d.from, to:d.to})) };
     await dbInsertMoves([{ type:'in', item_id:null, code:null, barcode:null,
       name:'清點盤點校正', category:'清點', qty:changes.length, price:0, subtotal:0,
-      unit_cost:0, sale_id:'STK-'+Date.now(), note:noteText, voided:false, ts:new Date().toISOString() }]);
+      unit_cost:0, sale_id:'STK-'+Date.now(), note:JSON.stringify(noteObj), voided:false, ts:new Date().toISOString() }]);
   }catch(e){ beep(false); stFlash('套用失敗：' + (e.message||e), false); return; }
   beep(true);
   stFlash('已套用清點結果，更新了 ' + changes.length + ' 項庫存，已記錄於異動紀錄', true);
@@ -1122,6 +1124,26 @@ async function voidMove(id){
   flash('已作廢並回沖庫存', true);
   await refresh();
 }
+function parseStocktakeNote(note){
+  if(!note || typeof note !== 'string' || note.charAt(0) !== '{') return null;
+  try{ const o = JSON.parse(note); if(o && o.t==='stocktake' && Array.isArray(o.detail)) return o; }catch(e){}
+  return null;
+}
+async function undoStocktake(id){
+  const m = moves.find(x=>x.id===id);
+  if(!m || m.voided) return;
+  const st = parseStocktakeNote(m.note);
+  if(!st){ alert('這筆盤點紀錄沒有可復原的明細'); return; }
+  if(!confirm('確定整筆復原這次清點？' + st.detail.length + ' 項教材的庫存會回到清點前的數字。')) return;
+  try{
+    // 以「差量的反向」回沖，避免蓋掉清點後其他的進出貨
+    for(const x of st.detail){ const delta = (x.to - x.from); if(delta) await dbAdjustStock(x.id, -delta); }
+    await dbVoidMoves([id]);
+  }catch(e){ alert('復原失敗：'+(e.message||e)); return; }
+  beep(true);
+  flash('已整筆復原這次清點，庫存已回到清點前', true);
+  await refresh();
+}
 async function voidSale(saleId){
   const lines = moves.filter(m=>m.sale_id===saleId && !m.voided);
   if(lines.length===0) return;
@@ -1381,15 +1403,23 @@ function renderMoves(){
       html += '<div class="logmonth">' + d.getFullYear() + ' 年 ' + (d.getMonth()+1) + ' 月</div>';
     }
     if(g.kind==='stocktake'){
-      const m = g.move;
-      const noteHtml = escapeHtml(m.note || ('盤點校正：' + m.qty + ' 項有差異')).replace(/\n/g, '<br>');
-      html += '<div class="logcard stocktake">'
+      const m = g.move, vd = m.voided;
+      const st = parseStocktakeNote(m.note);
+      let bodyHtml;
+      if(st){
+        const lines = st.detail.map(x=>{ const dl = x.to - x.from; return escapeHtml(x.name) + ' ' + x.from + '→' + x.to + '(' + (dl>0?'+':'') + dl + ')'; }).join('、');
+        bodyHtml = escapeHtml(st.summary) + '<div class="stdetail">明細：' + lines + '</div>';
+      } else {
+        bodyHtml = escapeHtml(m.note || ('盤點校正：' + m.qty + ' 項有差異')).replace(/\n/g, '<br>');
+      }
+      html += '<div class="logcard stocktake ' + (vd?'voided':'') + '">'
         + '<div class="logtop">'
           + '<span class="badge adjust">盤點校正</span>'
           + '<span class="logtime">' + fmtTime(m.ts) + '</span>'
           + '<span class="salesum">' + m.qty + ' 項差異</span>'
+          + (vd ? '<span class="voidmark">已復原</span>' : (st ? '<button class="rowbtn" onclick="undoStocktake(\'' + jesc(m.id) + '\')">整筆復原</button>' : ''))
         + '</div>'
-        + '<div class="logbody">' + noteHtml + '</div>'
+        + '<div class="logbody">' + bodyHtml + '</div>'
         + '</div>';
       continue;
     }
@@ -1443,11 +1473,18 @@ function exportItemsCSV(){
 
 function exportLogCSV(){
   const rows = [['時間','類型','出貨單','代號','條碼','名稱','分類','數量','單價','小計','成本','備註','狀態']];
-  moves.forEach(m=>rows.push([
-    new Date(m.ts).toLocaleString('zh-TW'), m.type==='in'?'進貨':'出貨', m.sale_id||'',
-    m.code||'', m.barcode||'', m.name, m.category||'', m.qty, m.price||0, m.subtotal||0, m.unit_cost||0, m.note||'',
-    m.voided?'已作廢':'有效'
-  ]));
+  moves.forEach(m=>{
+    const st = parseStocktakeNote(m.note);
+    const isStk = !!(m.sale_id && String(m.sale_id).startsWith('STK-'));
+    const typeTxt = isStk ? '清點校正' : (m.type==='in'?'進貨':'出貨');
+    let noteTxt = m.note||'';
+    if(st) noteTxt = st.summary + '；明細：' + st.detail.map(x=>x.name + ' ' + x.from + '→' + x.to).join('、');
+    rows.push([
+      new Date(m.ts).toLocaleString('zh-TW'), typeTxt, isStk?'':(m.sale_id||''),
+      m.code||'', m.barcode||'', m.name, m.category||'', m.qty, m.price||0, m.subtotal||0, m.unit_cost||0, noteTxt,
+      m.voided?(isStk?'已復原':'已作廢'):'有效'
+    ]);
+  });
   downloadCSV('進出貨紀錄.csv', rows);
 }
 
