@@ -369,6 +369,13 @@
         <div><label>進貨價（成本）</label><input type="number" id="niCost" value="0" min="0"></div>
         <div><label>出貨價（售價）</label><input type="number" id="niSell" value="0" min="0"></div>
       </div>
+      <div style="border-top:1px dashed var(--line);margin-top:.9rem;padding-top:.7rem;">
+        <div style="font-size:.85rem;color:var(--ink-soft);margin-bottom:5px;">或：這其實是<b>現有教材</b>的另一個條碼（例如再版換了條碼）—— 打書名或代號找到那本書，把剛掃到的條碼併進去，之後掃這個條碼就會對應到它：</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <input type="text" id="niMergeSearch" placeholder="打現有教材的名稱或代號" style="flex:1;min-width:160px;">
+          <button type="button" class="btn-ghost" onclick="mergeScannedToExisting()">併入現有教材</button>
+        </div>
+      </div>
       <div class="actions">
         <button class="save" onclick="saveNewItem()">建立並登記本次數量</button>
         <button class="cancel" onclick="cancelNewItem()">取消</button>
@@ -544,6 +551,27 @@
   </div>
 </div>
 
+<div class="modal" id="bcManageModal">
+  <div class="modal-box" style="max-width:560px;">
+    <h3 id="bcManageTitle">條碼設定</h3>
+    <p>一本教材可以有多個條碼（例如再版換了條碼、同名不同版）。掃描或掃到任何一個都會對應到這本書。「主要」條碼是列印標籤時會用的那一組。</p>
+    <div class="tablewrap" id="bcManageWrap" style="max-height:40vh;overflow:auto;"></div>
+    <div class="scan-row" style="margin-top:.7rem;">
+      <div class="scan-field" style="flex:1;min-width:180px;">
+        <span class="fieldlbl">新增條碼（可用條碼機掃描）</span>
+        <input type="text" id="bcManageInput" placeholder="掃描或輸入要加入的條碼">
+      </div>
+      <div class="scan-field" style="justify-content:flex-end;">
+        <span class="fieldlbl">&nbsp;</span>
+        <button onclick="bcManageAdd()">加入</button>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="primary" onclick="closeBarcodeManage()">完成</button>
+    </div>
+  </div>
+</div>
+
 <script>
 let items = [];
 let moves = [];
@@ -569,7 +597,25 @@ function uuid(){ return (crypto.randomUUID ? crypto.randomUUID() : 'id-'+Date.no
 function jesc(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function itemById(id){ return items.find(i=>i.id===id); }
-function itemByScan(v){ v = String(v||'').trim(); return items.find(i=> (i.barcode && i.barcode===v) || (i.code && i.code===v)); }
+/* 一本教材可有多個條碼（例如再版換了條碼），用 | 分隔存在同一個 barcode 欄位 */
+function barcodeList(item){ return String((item&&item.barcode)||'').split('|').map(s=>s.trim()).filter(Boolean); }
+function itemByBarcode(bc){ bc = String(bc||'').trim(); if(!bc) return null; return items.find(i=>barcodeList(i).includes(bc)) || null; }
+function itemByScan(v){ v = String(v||'').trim(); if(!v) return undefined; return items.find(i=> (i.code && i.code===v) || barcodeList(i).includes(v)); }
+async function addBarcodeToItem(id, bc){
+  bc = String(bc||'').trim(); if(!bc) return false;
+  const item = itemById(id); if(!item) return false;
+  const owner = itemByBarcode(bc);
+  if(owner && owner.id !== id){ alert('條碼「'+bc+'」已經是「'+owner.name+'」的條碼了'); return false; }
+  if(barcodeList(item).includes(bc)){ alert('這個條碼已經在「'+item.name+'」名下了'); return false; }
+  const list = barcodeList(item); list.push(bc);
+  try{ await dbUpdateItemFields(item, {barcode: list.join('|')}); }catch(e){ alert('失敗：'+(e.message||e)); return false; }
+  return true;
+}
+async function removeBarcodeFromItem(id, bc){
+  const item = itemById(id); if(!item) return;
+  const list = barcodeList(item).filter(b=>b!==bc);
+  try{ await dbUpdateItemFields(item, {barcode: list.length ? list.join('|') : null}); }catch(e){ alert('失敗：'+(e.message||e)); return; }
+}
 function fmtTime(ts){ return new Date(ts).toLocaleString('zh-TW', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'}); }
 
 function flash(msg, ok){
@@ -677,7 +723,7 @@ function openBarcodeTool(){ renderBarcodeList(); document.getElementById('barcod
 function closeBarcodeTool(){ document.getElementById('barcodeModal').classList.remove('show'); }
 function nextInternalBarcode(){
   let max = 0;
-  items.forEach(i=>{ const m = /^SF(\d+)$/.exec(i.barcode||''); if(m){ const n = parseInt(m[1]); if(n>max) max = n; } });
+  items.forEach(i=>barcodeList(i).forEach(b=>{ const m = /^SF(\d+)$/.exec(b); if(m){ const n = parseInt(m[1]); if(n>max) max = n; } }));
   return 'SF' + String(max+1).padStart(5, '0');
 }
 function renderBarcodeList(){
@@ -687,7 +733,7 @@ function renderBarcodeList(){
   const onlyNo = document.getElementById('bcOnlyNoBarcode').checked;
   let list = items.slice();
   if(onlyNo) list = list.filter(i=>!i.barcode);
-  if(q) list = list.filter(i=> i.name.toLowerCase().includes(q) || (i.code&&i.code.toLowerCase().includes(q)) || (i.barcode&&i.barcode.toLowerCase().includes(q)));
+  if(q) list = list.filter(i=> i.name.toLowerCase().includes(q) || (i.code&&i.code.toLowerCase().includes(q)) || barcodeList(i).some(b=>b.toLowerCase().includes(q)));
   list.sort((a,b)=>a.name.localeCompare(b.name,'zh-Hant'));
   const noBarcodeTotal = items.filter(i=>!i.barcode).length;
   summary.textContent = '目前沒有條碼的書共 ' + noBarcodeTotal + ' 本';
@@ -695,7 +741,8 @@ function renderBarcodeList(){
   let html = '<table><thead><tr><th>名稱</th><th>代號</th><th>目前條碼</th><th>庫存</th><th>要印幾張</th><th></th></tr></thead><tbody>';
   for(const i of list){
     const id = jesc(i.id);
-    const bc = i.barcode ? ('<span class="barcode-cell">'+escapeHtml(i.barcode)+'</span>') : '<span class="badge low">無</span>';
+    const bcl = barcodeList(i);
+    const bc = bcl.length ? ('<span class="barcode-cell">'+escapeHtml(bcl.join(' / '))+'</span>') : '<span class="badge low">無</span>';
     const btnLabel = i.barcode ? '列印標籤' : '產生條碼並列印';
     html += '<tr>'
       + '<td>' + escapeHtml(i.name) + '</td>'
@@ -734,7 +781,8 @@ function barcodeSVGString(value){
 }
 function printLabelsFor(item, qty){
   if(!item || !item.barcode) return;
-  const svg = barcodeSVGString(item.barcode);
+  const primary = barcodeList(item)[0];
+  const svg = barcodeSVGString(primary);
   let labels = '';
   for(let k=0;k<qty;k++){
     labels += '<div class="label">'
@@ -755,7 +803,7 @@ function printLabelsFor(item, qty){
     + '.hint{width:100%;font-size:9pt;color:#888;margin-bottom:3mm;}'
     + '@media print{.hint{display:none;} .label{border-color:#ddd;}}'
     + '</style></head><body>'
-    + '<div class="hint">共 ' + qty + ' 張標籤（' + escapeHtml(item.name) + '，條碼 ' + escapeHtml(item.barcode) + '）— 虛線為裁切參考線，列印前可先預覽。</div>'
+    + '<div class="hint">共 ' + qty + ' 張標籤（' + escapeHtml(item.name) + '，條碼 ' + escapeHtml(primary) + '）— 虛線為裁切參考線，列印前可先預覽。</div>'
     + '<div class="sheet">' + labels + '</div>'
     + '<script>window.onload=function(){setTimeout(function(){window.print();},200);}<\/script>'
     + '</body></html>';
@@ -796,7 +844,7 @@ function stScan(){
   if(!item){ beep(false); stFlash('找不到「' + v + '」，可輸入條碼／代號／名稱；沒有條碼的教材直接打名稱即可', false); input.value=''; input.focus(); return; }
   const ex = stList.find(s=>s.id===item.id);
   if(ex){ ex.counted += 1; stList = stList.filter(s=>s.id!==item.id); stList.unshift(ex); }
-  else stList.unshift({id:item.id, name:item.name, code:item.code, barcode:item.barcode, unit:item.unit, sys:item.stock, counted:1});
+  else stList.unshift({id:item.id, name:item.name, code:item.code, barcode:barcodeList(item)[0]||null, unit:item.unit, sys:item.stock, counted:1});
   beep(true);
   renderStocktake();
   input.value=''; input.focus();
@@ -909,7 +957,7 @@ async function dbLoadOrders(){
 }
 function ordersOnCloud(){ return cloudReady() && ordersUseCloud; }
 async function orderInsert(item, qty){
-  const row = {item_id:item.id, code:item.code||null, barcode:item.barcode||null, name:item.name, qty, ordered:false, note:null};
+  const row = {item_id:item.id, code:item.code||null, barcode:barcodeList(item)[0]||null, name:item.name, qty, ordered:false, note:null};
   if(ordersOnCloud()){
     const {data, error} = await sb.from('order_items').insert(row).select();
     if(error) throw error;
@@ -1055,9 +1103,12 @@ document.getElementById('stInput').addEventListener('keydown', e=>{
 document.getElementById('orderInput').addEventListener('keydown', e=>{
   if(e.key==='Enter'){ e.preventDefault(); orderAddManual(); }
 });
+document.getElementById('bcManageInput').addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ e.preventDefault(); bcManageAdd(); }
+});
 
 function makeMove(type, item, qty, price, unitCost, saleId){
-  return { type, item_id:item.id||null, code:item.code||null, barcode:item.barcode||null,
+  return { type, item_id:item.id||null, code:item.code||null, barcode:barcodeList(item)[0]||null,
            name:item.name, category:item.category,
            qty, price, subtotal:Math.round(price*qty*100)/100,
            unit_cost:unitCost||0, sale_id:saleId||null, note:null, voided:false,
@@ -1070,8 +1121,26 @@ function openNewItem(barcodePrefill){
   document.getElementById('niCode').value = '';
   document.getElementById('niName').value = '';
   document.getElementById('niStock').value = 0;
+  const ms = document.getElementById('niMergeSearch'); if(ms) ms.value = '';
   document.getElementById('newItemForm').classList.add('show');
   document.getElementById('niName').focus();
+}
+async function mergeScannedToExisting(){
+  const bc = document.getElementById('niBarcode').value.trim();
+  if(!bc){ alert('沒有可併入的條碼'); return; }
+  const q = document.getElementById('niMergeSearch').value.trim();
+  if(!q){ alert('請先輸入要併入的現有教材名稱或代號'); return; }
+  const lq = q.toLowerCase();
+  const target = items.find(i=>i.code && i.code.toLowerCase()===lq)
+    || items.find(i=>i.name.toLowerCase()===lq)
+    || items.find(i=>i.name.toLowerCase().includes(lq));
+  if(!target){ alert('找不到符合「'+q+'」的現有教材'); return; }
+  if(!confirm('把條碼「'+bc+'」併入「'+target.name+'」？\n以後掃這個條碼就會對應到這本書（原本的條碼也仍然有效）。')) return;
+  const ok = await addBarcodeToItem(target.id, bc);
+  if(!ok) return;
+  await refresh();
+  beep(true); flash('已把條碼併入「'+target.name+'」，請再掃一次剛剛那個條碼即可進貨/出貨', true);
+  cancelNewItem();
 }
 
 async function handleScan(){
@@ -1108,7 +1177,7 @@ function addToCart(item, qty, priceEntered){
   const price = priceEntered !== null ? priceEntered : (mode==='in' ? item.cost : item.sell);
   const ex = cart.find(c=>c.id===item.id);
   if(ex){ ex.qty += qty; if(priceEntered !== null) ex.price = price; ex.subtotal = ex.qty*ex.price; }
-  else cart.push({id:item.id, code:item.code, barcode:item.barcode, name:item.name, unit:item.unit, category:item.category, qty, price, cost:item.cost, subtotal:qty*price});
+  else cart.push({id:item.id, code:item.code, barcode:barcodeList(item)[0]||null, name:item.name, unit:item.unit, category:item.category, qty, price, cost:item.cost, subtotal:qty*price});
   beep(true);
   renderCart();
   flash('已加入' + (mode==='in'?'進貨':'出貨') + '清單：' + item.name + ' ×' + qty, true);
@@ -1182,7 +1251,7 @@ async function saveNewItem(){
   const priceEntered = priceRaw !== '' ? Math.max(0, parseFloat(priceRaw)) : null;
 
   if(!barcode && !code){ alert('請至少輸入條碼編號（或代號），系統才能辨識這個教材'); return; }
-  if(barcode && items.some(i=>i.barcode===barcode)){ alert('條碼「' + barcode + '」已被其他教材使用'); return; }
+  if(barcode && itemByBarcode(barcode)){ alert('條碼「' + barcode + '」已被其他教材使用'); return; }
   if(code && items.some(i=>i.code===code)){ alert('代號「' + code + '」已被其他教材使用'); return; }
 
   const newItem = {barcode: barcode || null, code: code || null, name, category, unit, stock:initStock, safety, cost, sell};
@@ -1252,15 +1321,60 @@ async function editCode(id){
   await refresh();
 }
 
-async function editBarcode(id){
-  const item = itemById(id);
-  if(!item) return;
-  const val = prompt('設定「' + item.name + '」的條碼編號（可用條碼機掃描或手動輸入；可留空）：', item.barcode || '');
-  if(val===null) return;
-  const nb = val.trim();
-  if(nb && nb !== item.barcode && items.some(i=>i.barcode===nb)){ alert('條碼「'+nb+'」已被其他教材使用'); return; }
-  try{ await dbUpdateItemFields(item, {barcode: nb || null}); }catch(e){ alert('失敗：'+(e.message||e)); return; }
+let bcManageId = null;
+function editBarcode(id){ openBarcodeManage(id); }
+function openBarcodeManage(id){
+  const item = itemById(id); if(!item) return;
+  bcManageId = id;
+  document.getElementById('bcManageTitle').textContent = '條碼設定 — ' + item.name;
+  document.getElementById('bcManageInput').value = '';
+  renderBarcodeManage();
+  document.getElementById('bcManageModal').classList.add('show');
+  setTimeout(()=>{ const el=document.getElementById('bcManageInput'); if(el) el.focus(); }, 50);
+}
+function closeBarcodeManage(){ document.getElementById('bcManageModal').classList.remove('show'); bcManageId = null; }
+function renderBarcodeManage(){
+  const item = itemById(bcManageId);
+  const wrap = document.getElementById('bcManageWrap');
+  if(!item){ wrap.innerHTML = ''; return; }
+  const list = barcodeList(item);
+  if(list.length === 0){ wrap.innerHTML = '<div class="empty">這本教材目前沒有條碼 — 下方輸入或掃描即可加入</div>'; return; }
+  let html = '<table><thead><tr><th>條碼</th><th></th><th></th></tr></thead><tbody>';
+  list.forEach((b, idx)=>{
+    html += '<tr>'
+      + '<td class="barcode-cell">' + escapeHtml(b) + '</td>'
+      + '<td>' + (idx===0 ? '<span class="badge ok">主要</span>' : '<button class="rowbtn" onclick="bcMakePrimary(\''+jesc(b)+'\')">設為主要</button>') + '</td>'
+      + '<td><button class="rowbtn" onclick="bcManageRemove(\''+jesc(b)+'\')">移除</button></td>'
+      + '</tr>';
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+async function bcManageAdd(){
+  const item = itemById(bcManageId); if(!item) return;
+  const el = document.getElementById('bcManageInput');
+  const bc = el.value.trim(); if(!bc) return;
+  const ok = await addBarcodeToItem(bcManageId, bc);
+  if(!ok){ el.value=''; el.focus(); return; }
+  el.value=''; el.focus();
   await refresh();
+  renderBarcodeManage();
+  flash('已加入條碼 ' + bc, true);
+}
+async function bcManageRemove(bc){
+  const item = itemById(bcManageId); if(!item) return;
+  if(!confirm('移除條碼「'+bc+'」？之後這個條碼就掃不到這本書了。')) return;
+  await removeBarcodeFromItem(bcManageId, bc);
+  await refresh();
+  renderBarcodeManage();
+}
+async function bcMakePrimary(bc){
+  const item = itemById(bcManageId); if(!item) return;
+  const list = barcodeList(item);
+  const reordered = [bc].concat(list.filter(b=>b!==bc));
+  try{ await dbUpdateItemFields(item, {barcode: reordered.join('|')}); }catch(e){ alert('失敗：'+(e.message||e)); return; }
+  await refresh();
+  renderBarcodeManage();
 }
 
 async function editPrice(id){
@@ -1521,8 +1635,9 @@ function renderItems(){
   for(const i of list){
     const low = i.stock < i.safety;
     const id = jesc(i.id);
-    const barcodeCell = i.barcode
-      ? escapeHtml(i.barcode)
+    const bl = barcodeList(i);
+    const barcodeCell = bl.length
+      ? (escapeHtml(bl[0]) + (bl.length>1 ? ' <span class="badge ok" title="' + escapeHtml(bl.join(' / ')) + '">＋'+(bl.length-1)+' 條碼</span>' : ''))
       : '<span class="badge low">待補條碼</span>';
     html += '<tr class="' + (low?'low':'') + '">'
       + '<td class="barcode-cell">' + (i.code ? escapeHtml(i.code) : '<span style="color:var(--ink-soft)">—</span>') + '</td>'
@@ -1649,7 +1764,7 @@ function downloadCSV(filename, rows){
 
 function exportItemsCSV(){
   const rows = [['代號','條碼','名稱','分類','單位','庫存','安全庫存','進貨價','出貨價','庫存總值']];
-  items.forEach(i=>rows.push([i.code||'',i.barcode||'',i.name,i.category,i.unit,i.stock,i.safety,i.cost,i.sell,i.stock*i.cost]));
+  items.forEach(i=>rows.push([i.code||'',barcodeList(i).join(' / '),i.name,i.category,i.unit,i.stock,i.safety,i.cost,i.sell,i.stock*i.cost]));
   downloadCSV('教材庫存.csv', rows);
 }
 
