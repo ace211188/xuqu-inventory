@@ -820,14 +820,23 @@ function primeAudio(){
     if(ctx.state==='suspended') ctx.resume();
   }catch(e){}
 }
-function toggleStocktake(){
+async function toggleStocktake(){
   const body = document.getElementById('stBody');
   const panel = document.getElementById('stPanel');
+  const toggle = document.getElementById('stToggle');
   const open = body.style.display === 'none';
   body.style.display = open ? 'block' : 'none';
   panel.classList.toggle('stactive', open);
-  document.getElementById('stToggle').textContent = open ? '● 清點模式進行中（收起）' : '開始清點';
-  if(open){ primeAudio(); renderStocktake(); document.getElementById('stInput').focus(); }
+  if(open){
+    primeAudio();
+    toggle.textContent = '● 清點模式進行中（更新庫存中…）';
+    try{ await refresh(); }catch(e){}   // 開始清點前先抓一次雲端最新庫存，避免用到舊數字
+    toggle.textContent = '● 清點模式進行中（收起）';
+    renderStocktake();
+    document.getElementById('stInput').focus();
+  } else {
+    toggle.textContent = '開始清點';
+  }
 }
 function stFlash(msg, ok){
   const f = document.getElementById('stFlash');
@@ -870,7 +879,9 @@ function renderStocktake(){
   let diffCount = 0;
   let html = '<table><thead><tr><th>條碼／代號</th><th>名稱</th><th>系統庫存</th><th>實際清點</th><th>差異</th><th></th></tr></thead><tbody>';
   for(const s of stList){
-    const diff = s.counted - s.sys;
+    const cur = itemById(s.id);
+    const sys = cur ? cur.stock : s.sys;   // 一律以目前最新庫存來比，避免用開太久的舊數字
+    const diff = s.counted - sys;
     if(diff !== 0) diffCount++;
     const id = jesc(s.id);
     const diffColor = diff < 0 ? 'var(--red)' : (diff > 0 ? 'var(--teal)' : 'var(--ink-soft)');
@@ -878,7 +889,7 @@ function renderStocktake(){
     html += '<tr>'
       + '<td class="barcode-cell">' + escapeHtml(s.barcode || s.code || '—') + '</td>'
       + '<td>' + escapeHtml(s.name) + '</td>'
-      + '<td>' + s.sys + ' ' + escapeHtml(s.unit) + '</td>'
+      + '<td>' + sys + ' ' + escapeHtml(s.unit) + '</td>'
       + '<td><input type="number" min="0" value="' + s.counted + '" style="width:70px" onchange="stSetCount(\'' + id + '\', this.value)"></td>'
       + '<td style="color:' + diffColor + ';font-weight:700">' + diffTxt + '</td>'
       + '<td><button class="rowbtn" onclick="stRemove(\'' + id + '\')">移除</button></td>'
@@ -889,11 +900,17 @@ function renderStocktake(){
   applyBtn.disabled = false;
   summary.textContent = '已清點 ' + stList.length + ' 項，其中 ' + diffCount + ' 項與系統不符';
 }
-function stApply(){
+async function stApply(){
   if(stList.length === 0) return;
+  const applyBtn = document.getElementById('stApplyBtn');
+  applyBtn.disabled = true;
+  const oldTxt = applyBtn.textContent; applyBtn.textContent = '核對最新庫存中…';
+  try{ await refresh(); }catch(e){}   // 套用前再抓一次雲端最新庫存，確保是跟現況比對
+  applyBtn.textContent = oldTxt; applyBtn.disabled = false;
+  renderStocktake();
   const totalCounted = stList.length;
   const changes = stList.filter(s=>{ const it = itemById(s.id); return it && it.stock !== s.counted; });
-  if(changes.length === 0){ stFlash('清點結果與系統庫存一致，無需調整', true); return; }
+  if(changes.length === 0){ stFlash('清點結果與最新庫存一致，無需調整', true); return; }
   // 先算好差異明細（用套用前的系統庫存）
   const detail = changes.map(s=>{ const it = itemById(s.id); return {id:s.id, name:s.name, from:it.stock, to:s.counted, delta:s.counted - it.stock}; });
   stPending = { totalCounted, detail };
