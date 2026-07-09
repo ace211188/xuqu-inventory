@@ -258,6 +258,8 @@
   .logmonth:first-child{margin-top:0;}
   .badge.adjust{background:var(--teal-deep);color:#fff;}
   .stdetail{margin-top:.3rem;font-size:.82rem;color:var(--ink-soft);line-height:1.5;}
+  #stPanel.stactive{border:2px solid var(--teal);box-shadow:0 0 0 4px var(--teal-bg);}
+  #stPanel.stactive #stToggle{background:var(--teal);color:#fff;border-color:var(--teal);}
   .logtop{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
   .logtime{font-size:.8rem;color:var(--ink-soft);}
   .logbody{margin-top:.35rem;font-size:.88rem;}
@@ -308,6 +310,7 @@
     <div class="stat"><div class="num" id="statCount">0</div><div class="lbl">教材種類</div></div>
     <div class="stat warn clickable" onclick="showLowStock()" title="點我看是哪些教材庫存不足"><div class="num" id="statLow">0</div><div class="lbl">庫存不足項目 ›</div></div>
     <div class="stat clickable" onclick="openOrders()" title="點我開啟訂購清單"><div class="num" id="statOrders">0</div><div class="lbl">訂購清單 ›</div></div>
+    <div class="stat clickable" onclick="openBarcodeTool()" title="給沒有條碼的書產生內部條碼並列印標籤"><div class="num" id="statBarcode">0</div><div class="lbl">🏷 條碼標籤 ›</div></div>
     <div class="stat"><div class="num" id="statToday">0</div><div class="lbl">今日進出貨筆數</div></div>
     <div class="stat"><div class="num" id="statValue">$0</div><div class="lbl">目前庫存總值（依進貨價）</div></div>
     <div class="stat"><div class="num" id="statRevenue">$0</div><div class="lbl">本月營收（出貨）</div></div>
@@ -387,13 +390,13 @@
     <div class="hint">出貨模式下，掃描或輸入編號會把教材加入這張清單；確認無誤後按「結帳出貨」，會一次記成同一張出貨單並扣庫存。</div>
   </div>
 
-  <div class="panel">
+  <div class="panel" id="stPanel">
     <div class="cart-head">
       <h2 style="margin:0;">清點庫存（實地盤點）</h2>
       <button class="btn-ghost" id="stToggle" onclick="toggleStocktake()">開始清點</button>
     </div>
     <div id="stBody" style="display:none;margin-top:1rem;">
-      <div class="hint" style="margin-top:0;">逐一掃描（或輸入編號）架上的每本教材，系統會自動累加清點數量；也可直接修改「實際」欄。全部清點完按「套用清點結果」把實際數量寫入庫存。此為人工盤點校正，不會產生進出貨紀錄。</div>
+      <div class="hint" style="margin-top:0;">清點模式：逐一掃描架上的每本教材（掃到會「嗶」一聲、找不到會發出低音警示），系統自動累加清點數量；也可直接改「實際」欄。全部清點完按「套用清點結果」，會先跳出與庫存不符的確認表，按同意後才寫入，並記成同一筆清點紀錄。</div>
       <div class="scan-row" style="margin-top:.7rem;">
         <div class="scan-field" style="flex:1;min-width:180px;">
           <span class="fieldlbl">清點掃描</span>
@@ -430,7 +433,6 @@
         <option value="其他">其他</option>
       </select>
       <button onclick="openManualAdd()">+ 手動新增教材</button>
-      <button onclick="openBarcodeTool()">🏷 條碼標籤</button>
       <button onclick="exportItemsCSV()">匯出庫存 CSV</button>
       <button onclick="exportBackup()">匯出備份 JSON</button>
       <button onclick="document.getElementById('importFile').click()">還原備份</button>
@@ -530,6 +532,18 @@
   </div>
 </div>
 
+<div class="modal" id="stConfirmModal">
+  <div class="modal-box" style="max-width:640px;">
+    <h3>確認清點結果（與目前庫存不符的項目）</h3>
+    <p id="stConfirmSummary"></p>
+    <div class="tablewrap" id="stConfirmWrap" style="max-height:52vh;overflow:auto;"></div>
+    <div class="modal-actions">
+      <button class="ghost" onclick="closeStConfirm()">取消</button>
+      <button class="primary" id="stConfirmBtn" onclick="stConfirmApply()">同意並套用</button>
+    </div>
+  </div>
+</div>
+
 <script>
 let items = [];
 let moves = [];
@@ -537,6 +551,7 @@ let mode = 'in';
 let pendingCode = '';
 let cart = [];
 let stList = [];
+let stPending = null;
 let orders = [];
 let ordersUseCloud = false;
 let sb = null;
@@ -751,12 +766,20 @@ function printLabelsFor(item, qty){
 }
 
 /* ---------- 清點庫存（實地盤點）---------- */
+function primeAudio(){
+  try{
+    const ctx = beep._ctx || (beep._ctx = new (window.AudioContext||window.webkitAudioContext)());
+    if(ctx.state==='suspended') ctx.resume();
+  }catch(e){}
+}
 function toggleStocktake(){
   const body = document.getElementById('stBody');
+  const panel = document.getElementById('stPanel');
   const open = body.style.display === 'none';
   body.style.display = open ? 'block' : 'none';
-  document.getElementById('stToggle').textContent = open ? '收起清點' : '開始清點';
-  if(open){ renderStocktake(); document.getElementById('stInput').focus(); }
+  panel.classList.toggle('stactive', open);
+  document.getElementById('stToggle').textContent = open ? '● 清點模式進行中（收起）' : '開始清點';
+  if(open){ primeAudio(); renderStocktake(); document.getElementById('stInput').focus(); }
 }
 function stFlash(msg, ok){
   const f = document.getElementById('stFlash');
@@ -818,28 +841,52 @@ function renderStocktake(){
   applyBtn.disabled = false;
   summary.textContent = '已清點 ' + stList.length + ' 項，其中 ' + diffCount + ' 項與系統不符';
 }
-async function stApply(){
+function stApply(){
   if(stList.length === 0) return;
   const totalCounted = stList.length;
   const changes = stList.filter(s=>{ const it = itemById(s.id); return it && it.stock !== s.counted; });
   if(changes.length === 0){ stFlash('清點結果與系統庫存一致，無需調整', true); return; }
-  if(!confirm('將把 ' + changes.length + ' 項教材的庫存更新為實際清點數量（人工校正，不產生進出貨紀錄）。確定套用？')) return;
   // 先算好差異明細（用套用前的系統庫存）
   const detail = changes.map(s=>{ const it = itemById(s.id); return {id:s.id, name:s.name, from:it.stock, to:s.counted, delta:s.counted - it.stock}; });
+  stPending = { totalCounted, detail };
+  // 跳出「與目前庫存不符」的確認表
   const net = detail.reduce((a,d)=>a + d.delta, 0);
   const up = detail.filter(d=>d.delta>0).reduce((a,d)=>a + d.delta, 0);
   const down = detail.filter(d=>d.delta<0).reduce((a,d)=>a - d.delta, 0);
+  let html = '<table><thead><tr><th>名稱</th><th>系統庫存</th><th>實際清點</th><th>差異</th></tr></thead><tbody>';
+  for(const d of detail){
+    const color = d.delta<0 ? 'var(--red)' : 'var(--teal)';
+    html += '<tr><td>' + escapeHtml(d.name) + '</td><td>' + d.from + '</td><td><b>' + d.to + '</b></td>'
+      + '<td style="color:' + color + ';font-weight:700">' + (d.delta>0?'+':'') + d.delta + '</td></tr>';
+  }
+  html += '</tbody></table>';
+  document.getElementById('stConfirmWrap').innerHTML = html;
+  document.getElementById('stConfirmSummary').textContent = '共清點 ' + totalCounted + ' 項，其中 ' + detail.length + ' 項與目前庫存不符，淨變動 ' + (net>0?'+':'') + net + '（增 ' + up + ' / 減 ' + down + '）。按「同意並套用」後，會把實際清點數量寫入庫存，並記成同一筆清點紀錄。';
+  document.getElementById('stConfirmModal').classList.add('show');
+}
+function closeStConfirm(){ document.getElementById('stConfirmModal').classList.remove('show'); }
+async function stConfirmApply(){
+  if(!stPending){ closeStConfirm(); return; }
+  const { totalCounted, detail } = stPending;
+  const net = detail.reduce((a,d)=>a + d.delta, 0);
+  const up = detail.filter(d=>d.delta>0).reduce((a,d)=>a + d.delta, 0);
+  const down = detail.filter(d=>d.delta<0).reduce((a,d)=>a - d.delta, 0);
+  const btn = document.getElementById('stConfirmBtn');
+  btn.disabled = true;
   try{
-    for(const s of changes){ const it = itemById(s.id); if(it) await dbUpdateItemFields(it, {stock: s.counted}); }
-    const summary = '共清點 ' + totalCounted + ' 項，' + changes.length + ' 項有差異，淨變動 ' + (net>0?'+':'') + net + '（增 ' + up + ' / 減 ' + down + '）';
+    for(const d of detail){ const it = itemById(d.id); if(it) await dbUpdateItemFields(it, {stock: d.to}); }
+    const summary = '共清點 ' + totalCounted + ' 項，' + detail.length + ' 項有差異，淨變動 ' + (net>0?'+':'') + net + '（增 ' + up + ' / 減 ' + down + '）';
     // note 存結構化 JSON，供顯示明細與「整筆復原」使用
     const noteObj = { t:'stocktake', summary:summary, detail:detail.map(d=>({id:d.id, name:d.name, from:d.from, to:d.to})) };
     await dbInsertMoves([{ type:'in', item_id:null, code:null, barcode:null,
-      name:'清點盤點校正', category:'清點', qty:changes.length, price:0, subtotal:0,
+      name:'清點盤點校正', category:'清點', qty:detail.length, price:0, subtotal:0,
       unit_cost:0, sale_id:'STK-'+Date.now(), note:JSON.stringify(noteObj), voided:false, ts:new Date().toISOString() }]);
-  }catch(e){ beep(false); stFlash('套用失敗：' + (e.message||e), false); return; }
+  }catch(e){ btn.disabled = false; beep(false); stFlash('套用失敗：' + (e.message||e), false); return; }
+  btn.disabled = false;
+  stPending = null;
+  closeStConfirm();
   beep(true);
-  stFlash('已套用清點結果，更新了 ' + changes.length + ' 項庫存，已記錄於異動紀錄', true);
+  stFlash('已套用清點結果，更新了 ' + detail.length + ' 項庫存，已記錄於異動紀錄', true);
   stList = [];
   renderStocktake();
   await refresh();
@@ -1434,6 +1481,7 @@ function renderStats(){
   document.getElementById('statCount').textContent = items.length;
   document.getElementById('statLow').textContent = items.filter(i=>i.stock < i.safety).length;
   document.getElementById('statPlaceholder').textContent = items.filter(i=>!i.barcode).length;
+  document.getElementById('statBarcode').textContent = items.filter(i=>!i.barcode).length;
   document.getElementById('statOrders').textContent = orders.filter(o=>!o.ordered).length;
   document.getElementById('statValue').textContent = money(items.reduce((s,i)=>s + i.stock*i.cost, 0));
 
