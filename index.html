@@ -518,7 +518,7 @@
 <div class="modal" id="barcodeModal">
   <div class="modal-box" style="max-width:720px;">
     <h3>條碼標籤（給沒有條碼的書）</h3>
-    <p>沒有實體條碼的書，可在這裡產生一組「內部條碼」並列印貼上。內部條碼會存進系統當作這本書的條碼，之後掃描就能直接辨識。同一本書要印幾張就填數量（例如架上有 5 本就印 5 張）。以後同一本書再叫貨，來這裡找到它、直接再列印即可。標籤會自動排版在 A4 內。</p>
+    <p>沒有實體條碼的書，可在這裡產生一組「內部條碼」並列印貼上。內部條碼會存進系統當作這本書的條碼，之後掃描就能直接辨識。同一本書要印幾張就填數量（例如架上有 5 本就印 5 張）。以後同一本書再叫貨，來這裡找到它、直接再列印即可。標籤已排版成 <b>L2040／B2040 標籤紙</b>（A4，5×14＝70 格，每格 40×20mm），可直接印在買來的現成標籤貼上。列印時請設「實際大小／100%、邊界無」，不要勾「符合頁面」，才會對齊。</p>
     <div class="scan-row">
       <div class="scan-field" style="flex:1;min-width:180px;">
         <span class="fieldlbl">搜尋書名／代號</span>
@@ -779,32 +779,50 @@ function barcodeSVGString(value){
     return new XMLSerializer().serializeToString(svg);
   }catch(e){ return '<div style="font-family:monospace">' + escapeHtml(value) + '</div>'; }
 }
+// 給 40×20mm 小標籤用的精簡條碼（矮一點、字小一點，才塞得進格子）
+function labelBarcodeSVGString(value){
+  try{
+    const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    JsBarcode(svg, value, {format:'CODE128', width:1.6, height:26, displayValue:true, fontSize:12, textMargin:1, margin:0});
+    return new XMLSerializer().serializeToString(svg);
+  }catch(e){ return '<div style="font-family:monospace">' + escapeHtml(value) + '</div>'; }
+}
+// 標籤紙規格：NO.L2040 / B2040（A4，5 欄 × 14 列＝70 格，每格 40×20mm，無間距）
+const LABEL_SHEET = { cols:5, rows:14, cellW:40, cellH:20, marginTop:8.5, marginLeft:5 };
 function printLabelsFor(item, qty){
   if(!item || !item.barcode) return;
   const primary = barcodeList(item)[0];
-  const svg = barcodeSVGString(primary);
-  let labels = '';
-  for(let k=0;k<qty;k++){
-    labels += '<div class="label">'
+  const svg = labelBarcodeSVGString(primary);
+  const perPage = LABEL_SHEET.cols * LABEL_SHEET.rows; // 70
+  const oneLabel = '<div class="label">'
       + '<div class="lname">' + escapeHtml(item.name) + '</div>'
-      + '<div class="lcode">' + (item.code?escapeHtml(item.code):'') + '</div>'
       + '<div class="lbc">' + svg + '</div>'
       + '</div>';
+  // 依 70 張切頁，每頁一張固定 A4，貼合預切標籤位置
+  let pages = '';
+  for(let start=0; start<qty; start+=perPage){
+    const n = Math.min(perPage, qty - start);
+    let cells = '';
+    for(let k=0;k<n;k++) cells += oneLabel;
+    pages += '<div class="page"><div class="grid">' + cells + '</div></div>';
   }
+  const S = LABEL_SHEET;
   const html = '<!doctype html><html><head><meta charset="utf-8"><title>條碼標籤 - ' + escapeHtml(item.name) + '</title>'
     + '<style>'
-    + '@page{size:A4;margin:8mm;}'
+    + '@page{size:A4;margin:0;}'
     + '*{box-sizing:border-box;} body{margin:0;font-family:"Microsoft JhengHei","PingFang TC",sans-serif;}'
-    + '.sheet{display:flex;flex-wrap:wrap;gap:2mm;}'
-    + '.label{width:63mm;height:34mm;border:1px dashed #bbb;border-radius:2mm;padding:2mm;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;page-break-inside:avoid;}'
-    + '.lname{font-size:11pt;font-weight:700;text-align:center;line-height:1.15;max-height:2.6em;overflow:hidden;}'
-    + '.lcode{font-size:8pt;color:#555;margin:1mm 0;}'
-    + '.lbc svg{max-width:58mm;height:auto;}'
-    + '.hint{width:100%;font-size:9pt;color:#888;margin-bottom:3mm;}'
-    + '@media print{.hint{display:none;} .label{border-color:#ddd;}}'
+    + '.hint{font-size:9pt;color:#888;padding:4mm 5mm;}'
+    + '.page{width:210mm;height:297mm;padding:' + S.marginTop + 'mm ' + S.marginLeft + 'mm;page-break-after:always;}'
+    + '.page:last-child{page-break-after:auto;}'
+    + '.grid{display:grid;grid-template-columns:repeat(' + S.cols + ',' + S.cellW + 'mm);grid-auto-rows:' + S.cellH + 'mm;gap:0;}'
+    + '.label{width:' + S.cellW + 'mm;height:' + S.cellH + 'mm;padding:1mm;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;border:.2mm dashed #ddd;}'
+    + '.lname{font-size:5.5pt;font-weight:700;text-align:center;line-height:1.1;max-height:2.2em;overflow:hidden;width:100%;}'
+    + '.lbc{width:100%;text-align:center;line-height:0;}'
+    + '.lbc svg{max-width:37mm;max-height:12mm;height:auto;}'
+    + '@media print{.hint{display:none;} .label{border:none;}}'
     + '</style></head><body>'
-    + '<div class="hint">共 ' + qty + ' 張標籤（' + escapeHtml(item.name) + '，條碼 ' + escapeHtml(primary) + '）— 虛線為裁切參考線，列印前可先預覽。</div>'
-    + '<div class="sheet">' + labels + '</div>'
+    + '<div class="hint">共 ' + qty + ' 張標籤（' + escapeHtml(item.name) + '，條碼 ' + escapeHtml(primary) + '）— 標籤紙 L2040/B2040（A4 70 格 40×20mm）。列印請設「實際大小 / 100%」、邊界「無」，勿勾「符合頁面」。虛線僅螢幕預覽用。</div>'
+    + pages
     + '<script>window.onload=function(){setTimeout(function(){window.print();},200);}<\/script>'
     + '</body></html>';
   const w = window.open('', '_blank');
