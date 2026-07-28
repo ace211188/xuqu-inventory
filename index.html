@@ -779,7 +779,7 @@ function barcodeSVGString(value){
     return new XMLSerializer().serializeToString(svg);
   }catch(e){ return '<div style="font-family:monospace">' + escapeHtml(value) + '</div>'; }
 }
-// 給 40×20mm 小標籤用的精簡條碼（矮一點、字小一點，才塞得進格子）
+// 給 52.5×21.2mm 小標籤用的精簡條碼（矮一點、字小一點，才塞得進格子）
 function labelBarcodeSVGString(value){
   try{
     const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
@@ -787,18 +787,18 @@ function labelBarcodeSVGString(value){
     return new XMLSerializer().serializeToString(svg);
   }catch(e){ return '<div style="font-family:monospace">' + escapeHtml(value) + '</div>'; }
 }
-// 標籤紙規格：NO.L2040 / B2040（A4，5 欄 × 14 列＝70 格，每格 40×20mm，無間距）
-const LABEL_SHEET = { cols:5, rows:14, cellW:40, cellH:20, marginTop:8.5, marginLeft:5 };
+// 標籤紙規格：A4，4 欄 × 14 列＝56 格，每格 52.5×21.2mm，無間距、無邊界
+const LABEL_SHEET = { cols:4, rows:14, cellW:52.5, cellH:21.2, marginTop:0, marginLeft:0 };
 function printLabelsFor(item, qty){
   if(!item || !item.barcode) return;
   const primary = barcodeList(item)[0];
   const svg = labelBarcodeSVGString(primary);
-  const perPage = LABEL_SHEET.cols * LABEL_SHEET.rows; // 70
+  const perPage = LABEL_SHEET.cols * LABEL_SHEET.rows; // 56
   const oneLabel = '<div class="label">'
       + '<div class="lname">' + escapeHtml(item.name) + '</div>'
       + '<div class="lbc">' + svg + '</div>'
       + '</div>';
-  // 依 70 張切頁，每頁一張固定 A4，貼合預切標籤位置
+  // 依 56 張切頁，每頁一張固定 A4，貼合預切標籤位置
   let pages = '';
   for(let start=0; start<qty; start+=perPage){
     const n = Math.min(perPage, qty - start);
@@ -818,10 +818,10 @@ function printLabelsFor(item, qty){
     + '.label{width:' + S.cellW + 'mm;height:' + S.cellH + 'mm;padding:1mm;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;border:.2mm dashed #ddd;}'
     + '.lname{font-size:5.5pt;font-weight:700;text-align:center;line-height:1.1;max-height:2.2em;overflow:hidden;width:100%;}'
     + '.lbc{width:100%;text-align:center;line-height:0;}'
-    + '.lbc svg{max-width:37mm;max-height:12mm;height:auto;}'
+    + '.lbc svg{max-width:49mm;max-height:12mm;height:auto;}'
     + '@media print{.hint{display:none;} .label{border:none;}}'
     + '</style></head><body>'
-    + '<div class="hint">共 ' + qty + ' 張標籤（' + escapeHtml(item.name) + '，條碼 ' + escapeHtml(primary) + '）— 標籤紙 L2040/B2040（A4 70 格 40×20mm）。列印請設「實際大小 / 100%」、邊界「無」，勿勾「符合頁面」。虛線僅螢幕預覽用。</div>'
+    + '<div class="hint">共 ' + qty + ' 張標籤（' + escapeHtml(item.name) + '，條碼 ' + escapeHtml(primary) + '）— 標籤紙 A4 56 格 52.5×21.2mm（4 欄 × 14 列）。列印請設「實際大小 / 100%」、邊界「無」，勿勾「符合頁面」。虛線僅螢幕預覽用。</div>'
     + pages
     + '<script>window.onload=function(){setTimeout(function(){window.print();},200);}<\/script>'
     + '</body></html>';
