@@ -518,11 +518,15 @@
 <div class="modal" id="barcodeModal">
   <div class="modal-box" style="max-width:720px;">
     <h3>條碼標籤（給沒有條碼的書）</h3>
-    <p>沒有實體條碼的書，可在這裡產生一組「內部條碼」並列印貼上。內部條碼會存進系統當作這本書的條碼，之後掃描就能直接辨識。同一本書要印幾張就填數量（例如架上有 5 本就印 5 張）。以後同一本書再叫貨，來這裡找到它、直接再列印即可。標籤已排版成 <b>L2040／B2040 標籤紙</b>（A4，5×14＝70 格，每格 40×20mm），可直接印在買來的現成標籤貼上。列印時請設「實際大小／100%、邊界無」，不要勾「符合頁面」，才會對齊。</p>
+    <p>沒有實體條碼的書，可在這裡產生一組「內部條碼」並列印貼上。內部條碼會存進系統當作這本書的條碼，之後掃描就能直接辨識。同一本書要印幾張就填數量（例如架上有 5 本就印 5 張）。以後同一本書再叫貨，來這裡找到它、直接再列印即可。標籤已排版成 <b>A4 標籤紙</b>（4×14＝56 格，每格 52.5×21.2mm 橫式），可直接印在買來的現成標籤貼上。列印時請設「實際大小／100%、邊界無」，不要勾「符合頁面」，才會對齊。</p>
     <div class="scan-row">
       <div class="scan-field" style="flex:1;min-width:180px;">
         <span class="fieldlbl">搜尋書名／代號</span>
         <input type="text" id="bcSearch" placeholder="打書名或代號找書" oninput="renderBarcodeList()">
+      </div>
+      <div class="scan-field" style="max-width:150px;">
+        <span class="fieldlbl">從第幾格開始貼</span>
+        <input type="number" id="bcStartCell" value="1" min="1" max="56" title="半張用過的標籤紙可從指定格子接著印，前面的格子會自動留白跳過。格子順序：由左到右、再往下一列。">
       </div>
       <div class="scan-field" style="justify-content:flex-end;">
         <span class="fieldlbl">&nbsp;</span>
@@ -531,6 +535,7 @@
         </label>
       </div>
     </div>
+    <p class="hint" style="margin:.4rem 0 0;">💡 <b>從第幾格開始貼</b>：整張新標籤紙填 <b>1</b>；如果這張紙前面幾格已經用掉，填要開始貼的格子號碼（格子由左到右數、數完一排再往下一排，共 56 格）。</p>
     <div class="tablewrap" id="barcodeWrap" style="margin-top:.8rem;max-height:48vh;overflow:auto;"></div>
     <div class="modal-actions">
       <span class="hint" id="bcSummary" style="margin:0;flex:1;min-width:120px;text-align:left;"></span>
@@ -762,6 +767,9 @@ async function assignAndPrintLabels(id){
   if(typeof JsBarcode === 'undefined'){ alert('條碼元件尚未載入完成，請稍等幾秒或檢查網路後再試一次'); return; }
   const qtyEl = document.getElementById('bcQty-' + id);
   const qty = Math.max(1, parseInt(qtyEl && qtyEl.value) || 1);
+  const startEl = document.getElementById('bcStartCell');
+  const perPage = LABEL_SHEET.cols * LABEL_SHEET.rows;
+  const startCell = Math.max(1, Math.min(perPage, parseInt(startEl && startEl.value) || 1));
   if(!item.barcode){
     const nb = nextInternalBarcode();
     if(!confirm('「' + item.name + '」目前沒有條碼。\n將產生內部條碼 ' + nb + ' 並存進系統當作它的條碼，然後列印 ' + qty + ' 張標籤。\n確定？')) return;
@@ -770,7 +778,7 @@ async function assignAndPrintLabels(id){
     renderBarcodeList();
   }
   const fresh = itemById(id);
-  printLabelsFor(fresh, qty);
+  printLabelsFor(fresh, qty, startCell);
 }
 function barcodeSVGString(value){
   try{
@@ -789,21 +797,25 @@ function labelBarcodeSVGString(value){
 }
 // 標籤紙規格：A4，4 欄 × 14 列＝56 格，每格 52.5×21.2mm，無間距、無邊界
 const LABEL_SHEET = { cols:4, rows:14, cellW:52.5, cellH:21.2, marginTop:0, marginLeft:0 };
-function printLabelsFor(item, qty){
+function printLabelsFor(item, qty, startCell){
   if(!item || !item.barcode) return;
   const primary = barcodeList(item)[0];
   const svg = labelBarcodeSVGString(primary);
   const perPage = LABEL_SHEET.cols * LABEL_SHEET.rows; // 56
+  // 從第幾格開始貼（1 起算）：前面用過的格子留白跳過，只在第一頁生效
+  const offset = Math.max(0, Math.min((parseInt(startCell) || 1) - 1, perPage - 1));
   const oneLabel = '<div class="label">'
       + '<div class="lname">' + escapeHtml(item.name) + '</div>'
       + '<div class="lbc">' + svg + '</div>'
       + '</div>';
-  // 依 56 張切頁，每頁一張固定 A4，貼合預切標籤位置
+  const blank = '<div class="label blank"></div>';
+  // 依 56 格切頁，每頁一張固定 A4，貼合預切標籤位置；前 offset 格留白
+  const total = offset + qty;
   let pages = '';
-  for(let start=0; start<qty; start+=perPage){
-    const n = Math.min(perPage, qty - start);
+  for(let start=0; start<total; start+=perPage){
+    const n = Math.min(perPage, total - start);
     let cells = '';
-    for(let k=0;k<n;k++) cells += oneLabel;
+    for(let k=0;k<n;k++) cells += (start + k < offset) ? blank : oneLabel;
     pages += '<div class="page"><div class="grid">' + cells + '</div></div>';
   }
   const S = LABEL_SHEET;
@@ -821,7 +833,7 @@ function printLabelsFor(item, qty){
     + '.lbc svg{max-width:49mm;max-height:12mm;height:auto;}'
     + '@media print{.hint{display:none;} .label{border:none;}}'
     + '</style></head><body>'
-    + '<div class="hint">共 ' + qty + ' 張標籤（' + escapeHtml(item.name) + '，條碼 ' + escapeHtml(primary) + '）— 標籤紙 A4 56 格 52.5×21.2mm（4 欄 × 14 列）。列印請設「實際大小 / 100%」、邊界「無」，勿勾「符合頁面」。虛線僅螢幕預覽用。</div>'
+    + '<div class="hint">共 ' + qty + ' 張標籤（' + escapeHtml(item.name) + '，條碼 ' + escapeHtml(primary) + '）' + (offset>0 ? '，從第 ' + (offset+1) + ' 格開始貼（前 ' + offset + ' 格留白）' : '') + ' — 標籤紙 A4 56 格 52.5×21.2mm（4 欄 × 14 列）。列印請設「實際大小 / 100%」、邊界「無」，勿勾「符合頁面」。虛線僅螢幕預覽用。</div>'
     + pages
     + '<script>window.onload=function(){setTimeout(function(){window.print();},200);}<\/script>'
     + '</body></html>';
