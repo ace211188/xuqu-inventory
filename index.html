@@ -598,11 +598,11 @@
     </div>
     <div class="hint" style="margin-top:.5rem;">輸入關鍵字會列出<b>所有</b>符合的教材（含各冊數），點你要的那一本才會加入 — 不會再自動跳到第二冊。</div>
     <div class="tablewrap" id="orderWrap" style="margin-top:.8rem;max-height:40vh;overflow:auto;"></div>
-    <div class="hint" style="margin-top:.6rem;">「帶入庫存不足」會帶入低於安全庫存的教材並預估建議量；也可手動加購。調整數量、勾「已訂購」，按「列印訂購單」印給供應商；到貨後用上方「進貨」掃描入庫。</div>
+    <div class="hint" style="margin-top:.6rem;">「帶入庫存不足」會帶入低於安全庫存的教材並預估建議量；也可手動加購、調整數量。確認好後按 <b>確認訂購</b>，會把整張清單記成一張訂購單（存進「各項紀錄 → 訂購紀錄」）並開啟列印；到貨後用「進貨」掃描入庫。</div>
     <div class="modal-actions">
       <span class="hint" id="orderSummary" style="margin:0;flex:1;min-width:120px;text-align:left;"></span>
-      <button class="ghost" onclick="orderClearOrdered()">清除已訂購</button>
-      <button class="primary" onclick="closeOrders()">關閉</button>
+      <button class="ghost" onclick="closeOrders()">關閉</button>
+      <button class="btn-checkout" id="orderConfirmBtn" onclick="confirmOrder()" disabled style="padding:.55rem 1.2rem;">✓ 確認訂購（送出訂購單）</button>
     </div>
   </div>
 </div>
@@ -1707,55 +1707,58 @@ async function orderClearOrdered(){
   flash('已清除 ' + done.length + ' 項', true);
 }
 function renderOrders(){
+  const pendingList = orders.filter(o=>!o.ordered);
   const so = document.getElementById('statOrders');
-  if(so) so.textContent = orders.filter(o=>!o.ordered).length;
+  if(so) so.textContent = pendingList.length;
+  const nb = document.getElementById('navOrders');
+  if(nb){ nb.textContent = pendingList.length; nb.style.display = pendingList.length ? 'inline-block' : 'none'; }
+  const cbtn = document.getElementById('orderConfirmBtn');
+  if(cbtn) cbtn.disabled = pendingList.length === 0;
   const wrap = document.getElementById('orderWrap');
   const summary = document.getElementById('orderSummary');
   if(!wrap) return;
-  if(orders.length === 0){
-    wrap.innerHTML = '<div class="empty">訂購清單是空的 — 按「帶入庫存不足」或在上方掃描／搜尋手動加入</div>';
-    summary.textContent = '';
+  if(pendingList.length === 0){
+    wrap.innerHTML = '<div class="empty">目前沒有待訂購的項目 — 按「帶入庫存不足」或在上方搜尋加入。<br>已送出的訂購單可到左側「各項紀錄 → 訂購紀錄」查看／重印。</div>';
+    if(summary) summary.textContent = '';
     return;
   }
-  let pending = 0;
-  let html = '<table><thead><tr><th>名稱</th><th>條碼／代號</th><th>目前庫存</th><th>安全</th><th>訂購量</th><th>已訂購</th><th></th></tr></thead><tbody>';
-  for(const o of orders){
+  let totalQ = 0;
+  let html = '<table><thead><tr><th>名稱</th><th>條碼／代號</th><th>目前庫存</th><th>安全</th><th>訂購量</th><th></th></tr></thead><tbody>';
+  for(const o of pendingList){
     const it = itemById(o.item_id);
     const stock = it ? it.stock : '—';
     const safety = it ? it.safety : '—';
     const low = it && it.stock < it.safety;
-    if(!o.ordered) pending++;
+    totalQ += (o.qty||0);
     const id = jesc(o.id);
-    html += '<tr' + (o.ordered ? ' style="opacity:.5"' : '') + '>'
+    html += '<tr>'
       + '<td>' + escapeHtml(o.name) + '</td>'
       + '<td class="barcode-cell">' + escapeHtml(o.barcode || o.code || '—') + '</td>'
       + '<td' + (low ? ' style="color:var(--red);font-weight:700"' : '') + '>' + stock + '</td>'
       + '<td>' + safety + '</td>'
       + '<td><input type="number" min="1" value="' + o.qty + '" style="width:64px" onchange="orderSetQty(\'' + id + '\', this.value)"></td>'
-      + '<td style="text-align:center"><input type="checkbox" ' + (o.ordered ? 'checked' : '') + ' onchange="orderToggleOrdered(\'' + id + '\', this.checked)"></td>'
       + '<td><button class="rowbtn" onclick="orderRemove(\'' + id + '\')">移除</button></td>'
       + '</tr>';
   }
   html += '</tbody></table>';
   wrap.innerHTML = html;
-  summary.textContent = '共 ' + orders.length + ' 項，其中 ' + pending + ' 項待訂購';
+  if(summary) summary.textContent = '待訂購 ' + pendingList.length + ' 項 / 共 ' + totalQ + ' 件';
 }
-function printOrders(){
-  const list = orders.filter(o=>!o.ordered);
-  if(list.length === 0){ alert('沒有待訂購的項目可列印（清單為空或都已標記已訂購）'); return; }
+function printOrderDoc(list, subtitle, metaExtra){
+  if(!list || list.length === 0){ alert('沒有可列印的項目'); return; }
   const dt = new Date().toLocaleString('zh-TW');
-  const totalQ = list.reduce((s,o)=>s+o.qty, 0);
+  const totalQ = list.reduce((s,o)=>s+(o.qty||0), 0);
   const rows = list.map(o=>'<tr><td>' + escapeHtml(o.name) + '</td><td>' + escapeHtml(o.barcode || o.code || '') + '</td><td class="c">' + o.qty + '</td></tr>').join('');
   const html = '<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="utf-8"><title>訂購單</title>'
     + '<style>*{box-sizing:border-box}body{font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;color:#1a2330;max-width:520px;margin:0 auto;padding:24px}'
     + 'h1{font-size:20px;margin:0 0 2px}.sub{color:#667;font-size:13px;margin-bottom:16px}'
-    + '.meta{font-size:13px;color:#334;margin-bottom:12px}'
+    + '.meta{font-size:13px;color:#334;margin-bottom:12px}.meta div{margin:2px 0}'
     + 'table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:8px 6px;border-bottom:1px solid #ddd;text-align:left}'
     + 'th{font-size:12px;color:#667}td.c,th.c{text-align:center}'
     + 'tfoot td{border-top:2px solid #333;border-bottom:none;font-weight:700;font-size:15px;padding-top:10px}'
     + '.foot{margin-top:26px;font-size:12px;color:#889;text-align:center}@media print{body{padding:0}}</style></head><body>'
-    + '<h1>序曲音樂學院</h1><div class="sub">教材訂購單</div>'
-    + '<div class="meta">日期：' + escapeHtml(dt) + '</div>'
+    + '<h1>序曲音樂學院</h1><div class="sub">' + escapeHtml(subtitle || '教材訂購單') + '</div>'
+    + '<div class="meta"><div>日期：' + escapeHtml(dt) + '</div>' + (metaExtra ? '<div>' + escapeHtml(metaExtra) + '</div>' : '') + '</div>'
     + '<table><thead><tr><th>教材名稱</th><th>條碼／代號</th><th class="c">訂購量</th></tr></thead>'
     + '<tbody>' + rows + '</tbody>'
     + '<tfoot><tr><td>合計品項 ' + list.length + '</td><td></td><td class="c">' + totalQ + '</td></tr></tfoot></table>'
@@ -1764,6 +1767,33 @@ function printOrders(){
   const w = window.open('', '_blank', 'width=600,height=760');
   if(!w){ alert('瀏覽器阻擋了列印視窗，請允許彈出視窗後再試一次'); return; }
   w.document.open(); w.document.write(html); w.document.close();
+}
+function printOrders(){
+  const list = orders.filter(o=>!o.ordered);
+  if(list.length === 0){ alert('沒有待訂購的項目可列印（清單為空或都已送出）'); return; }
+  printOrderDoc(list, '教材訂購單（草稿）', '');
+}
+function printOrderBatch(batchId){
+  const list = orders.filter(o=>o.batch_id===batchId);
+  if(list.length === 0){ alert('找不到這張訂購單的內容'); return; }
+  printOrderDoc(list, '教材訂購單', '訂購單號：' + String(batchId));
+}
+/* 確認訂購：把目前所有待訂購項目送出成「一張訂購單」，存進訂購紀錄（像進出貨結帳那樣） */
+async function confirmOrder(){
+  const pending = orders.filter(o=>!o.ordered);
+  if(pending.length === 0){ flash('訂購清單沒有待訂購的項目', false); return; }
+  const totalQ = pending.reduce((s,o)=>s+(o.qty||0), 0);
+  if(!confirm('確認送出訂購單？\n共 ' + pending.length + ' 項 / ' + totalQ + ' 件，會記成一張訂購單存進「各項紀錄 → 訂購紀錄」，並開啟列印視窗。')) return;
+  const batchId = 'ORD-' + Date.now();
+  const ts = new Date().toISOString();
+  const btn = document.getElementById('orderConfirmBtn'); if(btn) btn.disabled = true;
+  try{
+    for(const o of pending){ await orderUpdate(o.id, {ordered:true, ordered_at:ts, batch_id:batchId}); }
+  }catch(e){ if(btn) btn.disabled = false; beep(false); flash('送出失敗：'+(e.message||e), false); return; }
+  beep(true);
+  renderOrders(); renderRecords();
+  flash('已送出訂購單，共 ' + pending.length + ' 項（已存入訂購紀錄）', true);
+  printOrderBatch(batchId);
 }
 
 function renderAll(){
@@ -2146,14 +2176,38 @@ function renderRecords(){
     if(rows.length===0){ wrap.innerHTML=emptyRec('出貨'); return; }
     const g=groupCards(rows); wrap.innerHTML=recSummary('出貨',g.count,g.q,g.v)+g.html;
   } else if(recTab==='order'){
-    const rows=orders.filter(o=>inMonth(o.created_at||new Date(),key)).slice().sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
-    _recExport=[['建立時間','名稱','條碼/代號','訂購量','狀態','下單時間']];
-    rows.forEach(o=>_recExport.push([o.created_at?new Date(o.created_at).toLocaleString('zh-TW'):'',o.name,o.barcode||o.code||'',o.qty,o.ordered?'已訂購':'待訂購',o.ordered_at?new Date(o.ordered_at).toLocaleString('zh-TW'):'']));
-    if(rows.length===0){ wrap.innerHTML=emptyRec('訂購'); return; }
-    let html='<div class="tablewrap"><table><thead><tr><th>建立時間</th><th>名稱</th><th>條碼／代號</th><th>訂購量</th><th>狀態</th><th>下單時間</th></tr></thead><tbody>';
-    for(const o of rows){ html+='<tr><td>'+(o.created_at?fmtTime(o.created_at):'—')+'</td><td>'+escapeHtml(o.name)+'</td><td class="barcode-cell">'+escapeHtml(o.barcode||o.code||'—')+'</td><td>'+o.qty+'</td><td><span class="badge '+(o.ordered?'ok':'low')+'">'+(o.ordered?'已訂購':'待訂購')+'</span></td><td>'+(o.ordered_at?fmtTime(o.ordered_at):'—')+'</td></tr>'; }
-    html+='</tbody></table></div>';
-    wrap.innerHTML='<div class="hint" style="margin:.1rem 0 .8rem">共 '+rows.length+' 筆訂購（待訂購 '+rows.filter(o=>!o.ordered).length+'，已訂購 '+rows.filter(o=>o.ordered).length+'）</div>'+html;
+    // 已「確認訂購」的項目依 batch_id 群組成一張張訂購單；其餘（未送出／單筆）另列表格
+    const batchMap={}, noBatch=[];
+    orders.forEach(o=>{ if(o.batch_id){ (batchMap[o.batch_id]=batchMap[o.batch_id]||{batch_id:o.batch_id, ts:o.ordered_at||o.created_at, lines:[]}).lines.push(o); } else noBatch.push(o); });
+    const batches=Object.values(batchMap).filter(b=>inMonth(b.ts,key)).sort((a,b)=>new Date(b.ts)-new Date(a.ts));
+    const pending=noBatch.filter(o=>!o.ordered && inMonth(o.created_at||new Date(),key)).sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
+    const legacy=noBatch.filter(o=>o.ordered && inMonth(o.ordered_at||o.created_at||new Date(),key)).sort((a,b)=>new Date(b.ordered_at||0)-new Date(a.ordered_at||0));
+    _recExport=[['訂購單','時間','名稱','條碼/代號','訂購量','狀態']];
+    batches.forEach(b=>b.lines.forEach(o=>_recExport.push([String(b.batch_id).slice(0,12), new Date(b.ts).toLocaleString('zh-TW'), o.name, o.barcode||o.code||'', o.qty, '已訂購'])));
+    pending.forEach(o=>_recExport.push(['(未送出)', o.created_at?new Date(o.created_at).toLocaleString('zh-TW'):'', o.name, o.barcode||o.code||'', o.qty, '待訂購']));
+    legacy.forEach(o=>_recExport.push(['(單筆)', o.ordered_at?new Date(o.ordered_at).toLocaleString('zh-TW'):'', o.name, o.barcode||o.code||'', o.qty, '已訂購']));
+    if(batches.length===0 && pending.length===0 && legacy.length===0){ wrap.innerHTML=emptyRec('訂購'); return; }
+    let html='<div class="hint" style="margin:.1rem 0 .8rem">訂購單 '+batches.length+' 張 · 待訂購 '+pending.length+' 項</div>';
+    for(const b of batches){
+      const qtot=b.lines.reduce((s,l)=>s+(l.qty||0),0);
+      html+='<div class="logcard sale"><div class="logtop">'
+        +'<span class="badge low">訂購單</span>'
+        +'<span class="logtime">'+fmtTime(b.ts)+'</span>'
+        +'<span class="salesum">'+b.lines.length+' 項 / '+qtot+' 件</span>'
+        +'<button class="rowbtn" onclick="printOrderBatch(\''+jesc(b.batch_id)+'\')">列印</button>'
+        +'</div><ul class="saleitems">'
+        +b.lines.map(l=>'<li>'+escapeHtml(l.name)+' <span class="barcode-cell">('+escapeHtml(l.barcode||l.code||'—')+')</span> ×'+l.qty+'</li>').join('')
+        +'</ul></div>';
+    }
+    const extra=pending.concat(legacy);
+    if(extra.length){
+      html+='<div class="hint" style="margin:.7rem 0 .4rem">尚未送出訂購單 / 單筆項目：</div>';
+      html+='<div class="tablewrap"><table><thead><tr><th>時間</th><th>名稱</th><th>條碼／代號</th><th>訂購量</th><th>狀態</th></tr></thead><tbody>';
+      for(const o of pending){ html+='<tr><td>'+(o.created_at?fmtTime(o.created_at):'—')+'</td><td>'+escapeHtml(o.name)+'</td><td class="barcode-cell">'+escapeHtml(o.barcode||o.code||'—')+'</td><td>'+o.qty+'</td><td><span class="badge low">待訂購</span></td></tr>'; }
+      for(const o of legacy){ html+='<tr><td>'+(o.ordered_at?fmtTime(o.ordered_at):'—')+'</td><td>'+escapeHtml(o.name)+'</td><td class="barcode-cell">'+escapeHtml(o.barcode||o.code||'—')+'</td><td>'+o.qty+'</td><td><span class="badge ok">已訂購</span></td></tr>'; }
+      html+='</tbody></table></div>';
+    }
+    wrap.innerHTML=html;
   } else {
     const rows=moves.filter(m=>isStk(m) && inMonth(m.ts,key)).sort((a,b)=>new Date(b.ts)-new Date(a.ts));
     _recExport=[['時間','摘要','差異項目數','狀態']];
