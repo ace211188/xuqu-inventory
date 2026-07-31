@@ -307,8 +307,10 @@
   .navbtn.active{background:rgba(255,255,255,.1);color:#fff;border-left-color:var(--amber);}
   .navbtn .ic{font-size:1.02rem;width:1.25rem;text-align:center;}
   .navbtn .nbadge{margin-left:auto;background:var(--amber);color:#fff;font-size:.68rem;font-weight:700;border-radius:20px;padding:1px 7px;min-width:18px;text-align:center;}
-  .content{margin-left:212px;max-width:1120px;padding:1.4rem 1.6rem 4rem;}
+  .content{max-width:none;margin:0 0 0 212px;padding:1.4rem 1.6rem 4rem;display:flex;flex-direction:column;align-items:center;}
+  .content > *{width:100%;max-width:1040px;}
   .view{display:none;}
+  .view.active{display:block;}
   .view.active{display:block;}
   .menutoggle{display:none;}
   .navscrim{display:none;}
@@ -1103,7 +1105,7 @@ async function dbLoadOrders(){
 }
 function ordersOnCloud(){ return cloudReady() && ordersUseCloud; }
 async function orderInsert(item, qty){
-  const row = {item_id:item.id, code:item.code||null, barcode:barcodeList(item)[0]||null, name:item.name, qty, ordered:false, note:null};
+  const row = {item_id:item.id, code:item.code||null, barcode:barcodeList(item)[0]||null, name:item.name, qty, unit_price:(Number(item.cost)||0), ordered:false, note:null};
   if(ordersOnCloud()){
     const {data, error} = await sb.from('order_items').insert(row).select();
     if(error) throw error;
@@ -1722,49 +1724,64 @@ function renderOrders(){
     if(summary) summary.textContent = '';
     return;
   }
-  let totalQ = 0;
-  let html = '<table><thead><tr><th>名稱</th><th>條碼／代號</th><th>目前庫存</th><th>安全</th><th>訂購量</th><th></th></tr></thead><tbody>';
+  let totalQ = 0, totalAmt = 0;
+  let html = '<table><thead><tr><th>名稱</th><th>條碼／代號</th><th>現在庫存</th><th>訂購量</th><th>預算單價</th><th>金額</th><th></th></tr></thead><tbody>';
   for(const o of pendingList){
     const it = itemById(o.item_id);
-    const stock = it ? it.stock : '—';
-    const safety = it ? it.safety : '—';
-    const low = it && it.stock < it.safety;
-    totalQ += (o.qty||0);
+    const price = (o.unit_price!=null ? Number(o.unit_price) : (it ? Number(it.cost)||0 : 0));
+    const amt = price * (o.qty||0);
+    totalQ += (o.qty||0); totalAmt += amt;
+    let stockCell;
+    if(!it){ stockCell = '<span style="color:var(--ink-soft)">—</span>'; }
+    else if(it.stock <= 0){ stockCell = '<b style="color:var(--red)">0</b> <span class="badge low">缺貨</span>'; }
+    else if(it.stock < it.safety){ stockCell = '<b style="color:var(--red)">' + it.stock + '</b> ' + escapeHtml(it.unit) + ' <span class="badge low">不足</span>'; }
+    else { stockCell = it.stock + ' ' + escapeHtml(it.unit); }
     const id = jesc(o.id);
     html += '<tr>'
       + '<td>' + escapeHtml(o.name) + '</td>'
       + '<td class="barcode-cell">' + escapeHtml(o.barcode || o.code || '—') + '</td>'
-      + '<td' + (low ? ' style="color:var(--red);font-weight:700"' : '') + '>' + stock + '</td>'
-      + '<td>' + safety + '</td>'
-      + '<td><input type="number" min="1" value="' + o.qty + '" style="width:64px" onchange="orderSetQty(\'' + id + '\', this.value)"></td>'
+      + '<td>' + stockCell + (it ? ' <span class="sr-meta">(安全' + it.safety + ')</span>' : '') + '</td>'
+      + '<td><input type="number" min="1" value="' + o.qty + '" style="width:60px" onchange="orderSetQty(\'' + id + '\', this.value)"></td>'
+      + '<td><input type="number" min="0" value="' + price + '" style="width:74px" onchange="orderSetPrice(\'' + id + '\', this.value)"></td>'
+      + '<td><b>' + money(amt) + '</b></td>'
       + '<td><button class="rowbtn" onclick="orderRemove(\'' + id + '\')">移除</button></td>'
       + '</tr>';
   }
-  html += '</tbody></table>';
+  html += '</tbody><tfoot><tr><td colspan="5" style="text-align:right;font-weight:700;border-top:2px solid var(--line)">預算總價</td><td style="font-weight:700;border-top:2px solid var(--line);color:var(--amber)">' + money(totalAmt) + '</td><td style="border-top:2px solid var(--line)"></td></tr></tfoot></table>';
   wrap.innerHTML = html;
-  if(summary) summary.textContent = '待訂購 ' + pendingList.length + ' 項 / 共 ' + totalQ + ' 件';
+  if(summary) summary.textContent = '待訂購 ' + pendingList.length + ' 項 / 共 ' + totalQ + ' 件 / 預算 ' + money(totalAmt);
+}
+async function orderSetPrice(id, v){
+  const p = Math.max(0, parseFloat(v) || 0);
+  try{ await orderUpdate(id, {unit_price:p}); }catch(e){ flash('更新失敗：'+(e.message||e), false); }
+  renderOrders();
+}
+function orderPriceOf(o){
+  if(o.unit_price!=null) return Number(o.unit_price)||0;
+  const it = itemById(o.item_id); return it ? (Number(it.cost)||0) : 0;
 }
 function printOrderDoc(list, subtitle, metaExtra){
   if(!list || list.length === 0){ alert('沒有可列印的項目'); return; }
   const dt = new Date().toLocaleString('zh-TW');
   const totalQ = list.reduce((s,o)=>s+(o.qty||0), 0);
-  const rows = list.map(o=>'<tr><td>' + escapeHtml(o.name) + '</td><td>' + escapeHtml(o.barcode || o.code || '') + '</td><td class="c">' + o.qty + '</td></tr>').join('');
+  const totalAmt = list.reduce((s,o)=>s+orderPriceOf(o)*(o.qty||0), 0);
+  const rows = list.map(o=>{ const p=orderPriceOf(o); return '<tr><td>' + escapeHtml(o.name) + '</td><td>' + escapeHtml(o.barcode || o.code || '') + '</td><td class="c">' + o.qty + '</td><td class="r">' + money(p) + '</td><td class="r">' + money(p*(o.qty||0)) + '</td></tr>'; }).join('');
   const html = '<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="utf-8"><title>訂購單</title>'
-    + '<style>*{box-sizing:border-box}body{font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;color:#1a2330;max-width:520px;margin:0 auto;padding:24px}'
+    + '<style>*{box-sizing:border-box}body{font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;color:#1a2330;max-width:560px;margin:0 auto;padding:24px}'
     + 'h1{font-size:20px;margin:0 0 2px}.sub{color:#667;font-size:13px;margin-bottom:16px}'
     + '.meta{font-size:13px;color:#334;margin-bottom:12px}.meta div{margin:2px 0}'
     + 'table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:8px 6px;border-bottom:1px solid #ddd;text-align:left}'
-    + 'th{font-size:12px;color:#667}td.c,th.c{text-align:center}'
+    + 'th{font-size:12px;color:#667}td.c,th.c{text-align:center}td.r,th.r{text-align:right}'
     + 'tfoot td{border-top:2px solid #333;border-bottom:none;font-weight:700;font-size:15px;padding-top:10px}'
     + '.foot{margin-top:26px;font-size:12px;color:#889;text-align:center}@media print{body{padding:0}}</style></head><body>'
     + '<h1>序曲音樂學院</h1><div class="sub">' + escapeHtml(subtitle || '教材訂購單') + '</div>'
     + '<div class="meta"><div>日期：' + escapeHtml(dt) + '</div>' + (metaExtra ? '<div>' + escapeHtml(metaExtra) + '</div>' : '') + '</div>'
-    + '<table><thead><tr><th>教材名稱</th><th>條碼／代號</th><th class="c">訂購量</th></tr></thead>'
+    + '<table><thead><tr><th>教材名稱</th><th>條碼／代號</th><th class="c">訂購量</th><th class="r">預算單價</th><th class="r">小計</th></tr></thead>'
     + '<tbody>' + rows + '</tbody>'
-    + '<tfoot><tr><td>合計品項 ' + list.length + '</td><td></td><td class="c">' + totalQ + '</td></tr></tfoot></table>'
-    + '<div class="foot">序曲音樂學院 教材訂購單</div>'
+    + '<tfoot><tr><td>合計品項 ' + list.length + '</td><td></td><td class="c">' + totalQ + '</td><td class="r">預算總價</td><td class="r">' + money(totalAmt) + '</td></tr></tfoot></table>'
+    + '<div class="foot">序曲音樂學院 教材訂購單（預算單價供參考）</div>'
     + '<scr' + 'ipt>window.onload=function(){window.print();}</scr' + 'ipt></body></html>';
-  const w = window.open('', '_blank', 'width=600,height=760');
+  const w = window.open('', '_blank', 'width=620,height=780');
   if(!w){ alert('瀏覽器阻擋了列印視窗，請允許彈出視窗後再試一次'); return; }
   w.document.open(); w.document.write(html); w.document.close();
 }
@@ -1783,7 +1800,8 @@ async function confirmOrder(){
   const pending = orders.filter(o=>!o.ordered);
   if(pending.length === 0){ flash('訂購清單沒有待訂購的項目', false); return; }
   const totalQ = pending.reduce((s,o)=>s+(o.qty||0), 0);
-  if(!confirm('確認送出訂購單？\n共 ' + pending.length + ' 項 / ' + totalQ + ' 件，會記成一張訂購單存進「各項紀錄 → 訂購紀錄」，並開啟列印視窗。')) return;
+  const totalAmt = pending.reduce((s,o)=>s+orderPriceOf(o)*(o.qty||0), 0);
+  if(!confirm('確認送出訂購單？\n共 ' + pending.length + ' 項 / ' + totalQ + ' 件 / 預算 ' + money(totalAmt) + '，會記成一張訂購單存進「各項紀錄 → 訂購紀錄」，並開啟列印視窗。')) return;
   const batchId = 'ORD-' + Date.now();
   const ts = new Date().toISOString();
   const btn = document.getElementById('orderConfirmBtn'); if(btn) btn.disabled = true;
@@ -2182,29 +2200,30 @@ function renderRecords(){
     const batches=Object.values(batchMap).filter(b=>inMonth(b.ts,key)).sort((a,b)=>new Date(b.ts)-new Date(a.ts));
     const pending=noBatch.filter(o=>!o.ordered && inMonth(o.created_at||new Date(),key)).sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
     const legacy=noBatch.filter(o=>o.ordered && inMonth(o.ordered_at||o.created_at||new Date(),key)).sort((a,b)=>new Date(b.ordered_at||0)-new Date(a.ordered_at||0));
-    _recExport=[['訂購單','時間','名稱','條碼/代號','訂購量','狀態']];
-    batches.forEach(b=>b.lines.forEach(o=>_recExport.push([String(b.batch_id).slice(0,12), new Date(b.ts).toLocaleString('zh-TW'), o.name, o.barcode||o.code||'', o.qty, '已訂購'])));
-    pending.forEach(o=>_recExport.push(['(未送出)', o.created_at?new Date(o.created_at).toLocaleString('zh-TW'):'', o.name, o.barcode||o.code||'', o.qty, '待訂購']));
-    legacy.forEach(o=>_recExport.push(['(單筆)', o.ordered_at?new Date(o.ordered_at).toLocaleString('zh-TW'):'', o.name, o.barcode||o.code||'', o.qty, '已訂購']));
+    _recExport=[['訂購單','時間','名稱','條碼/代號','訂購量','預算單價','小計','狀態']];
+    batches.forEach(b=>b.lines.forEach(o=>{ const p=orderPriceOf(o); _recExport.push([String(b.batch_id).slice(0,12), new Date(b.ts).toLocaleString('zh-TW'), o.name, o.barcode||o.code||'', o.qty, p, p*(o.qty||0), '已訂購']); }));
+    pending.forEach(o=>{ const p=orderPriceOf(o); _recExport.push(['(未送出)', o.created_at?new Date(o.created_at).toLocaleString('zh-TW'):'', o.name, o.barcode||o.code||'', o.qty, p, p*(o.qty||0), '待訂購']); });
+    legacy.forEach(o=>{ const p=orderPriceOf(o); _recExport.push(['(單筆)', o.ordered_at?new Date(o.ordered_at).toLocaleString('zh-TW'):'', o.name, o.barcode||o.code||'', o.qty, p, p*(o.qty||0), '已訂購']); });
     if(batches.length===0 && pending.length===0 && legacy.length===0){ wrap.innerHTML=emptyRec('訂購'); return; }
     let html='<div class="hint" style="margin:.1rem 0 .8rem">訂購單 '+batches.length+' 張 · 待訂購 '+pending.length+' 項</div>';
     for(const b of batches){
       const qtot=b.lines.reduce((s,l)=>s+(l.qty||0),0);
+      const amt=b.lines.reduce((s,l)=>s+orderPriceOf(l)*(l.qty||0),0);
       html+='<div class="logcard sale"><div class="logtop">'
         +'<span class="badge low">訂購單</span>'
         +'<span class="logtime">'+fmtTime(b.ts)+'</span>'
-        +'<span class="salesum">'+b.lines.length+' 項 / '+qtot+' 件</span>'
+        +'<span class="salesum">'+b.lines.length+' 項 / '+qtot+' 件 / 預算 <b>'+money(amt)+'</b></span>'
         +'<button class="rowbtn" onclick="printOrderBatch(\''+jesc(b.batch_id)+'\')">列印</button>'
         +'</div><ul class="saleitems">'
-        +b.lines.map(l=>'<li>'+escapeHtml(l.name)+' <span class="barcode-cell">('+escapeHtml(l.barcode||l.code||'—')+')</span> ×'+l.qty+'</li>').join('')
+        +b.lines.map(l=>{ const p=orderPriceOf(l); return '<li>'+escapeHtml(l.name)+' <span class="barcode-cell">('+escapeHtml(l.barcode||l.code||'—')+')</span> ×'+l.qty+' @ '+money(p)+' = '+money(p*(l.qty||0))+'</li>'; }).join('')
         +'</ul></div>';
     }
     const extra=pending.concat(legacy);
     if(extra.length){
       html+='<div class="hint" style="margin:.7rem 0 .4rem">尚未送出訂購單 / 單筆項目：</div>';
-      html+='<div class="tablewrap"><table><thead><tr><th>時間</th><th>名稱</th><th>條碼／代號</th><th>訂購量</th><th>狀態</th></tr></thead><tbody>';
-      for(const o of pending){ html+='<tr><td>'+(o.created_at?fmtTime(o.created_at):'—')+'</td><td>'+escapeHtml(o.name)+'</td><td class="barcode-cell">'+escapeHtml(o.barcode||o.code||'—')+'</td><td>'+o.qty+'</td><td><span class="badge low">待訂購</span></td></tr>'; }
-      for(const o of legacy){ html+='<tr><td>'+(o.ordered_at?fmtTime(o.ordered_at):'—')+'</td><td>'+escapeHtml(o.name)+'</td><td class="barcode-cell">'+escapeHtml(o.barcode||o.code||'—')+'</td><td>'+o.qty+'</td><td><span class="badge ok">已訂購</span></td></tr>'; }
+      html+='<div class="tablewrap"><table><thead><tr><th>時間</th><th>名稱</th><th>條碼／代號</th><th>訂購量</th><th>預算單價</th><th>小計</th><th>狀態</th></tr></thead><tbody>';
+      for(const o of pending){ const p=orderPriceOf(o); html+='<tr><td>'+(o.created_at?fmtTime(o.created_at):'—')+'</td><td>'+escapeHtml(o.name)+'</td><td class="barcode-cell">'+escapeHtml(o.barcode||o.code||'—')+'</td><td>'+o.qty+'</td><td>'+money(p)+'</td><td>'+money(p*(o.qty||0))+'</td><td><span class="badge low">待訂購</span></td></tr>'; }
+      for(const o of legacy){ const p=orderPriceOf(o); html+='<tr><td>'+(o.ordered_at?fmtTime(o.ordered_at):'—')+'</td><td>'+escapeHtml(o.name)+'</td><td class="barcode-cell">'+escapeHtml(o.barcode||o.code||'—')+'</td><td>'+o.qty+'</td><td>'+money(p)+'</td><td>'+money(p*(o.qty||0))+'</td><td><span class="badge ok">已訂購</span></td></tr>'; }
       html+='</tbody></table></div>';
     }
     wrap.innerHTML=html;
