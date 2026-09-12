@@ -413,7 +413,12 @@
     <div class="newitem" id="newItemForm">
       <div style="font-weight:700;color:#7a4c0d;" id="niFormTitle">找不到這個條碼 — 是否要建立新教材？</div>
       <div class="grid">
-        <div><label>條碼編號</label><input type="text" id="niBarcode" placeholder="實體條碼（掃描會自動帶入）"></div>
+        <div><label>條碼編號</label>
+          <div style="display:flex;gap:6px;">
+            <input type="text" id="niBarcode" placeholder="實體條碼（掃描會自動帶入）" style="flex:1;min-width:0;">
+            <button type="button" class="btn-ghost" onclick="genBarcodeForNew()" title="沒有實體條碼的書，按這裡自動配一個內部條碼" style="white-space:nowrap;">沒有條碼？自動產生</button>
+          </div>
+        </div>
         <div><label>代號（選填）</label><input type="text" id="niCode" placeholder="舊代號，可留空"></div>
         <div><label>教材名稱 *</label><input type="text" id="niName" placeholder="例如：拜爾鋼琴教本(一)"></div>
         <div><label>分類</label>
@@ -1386,7 +1391,7 @@ function cancelNewItem(){
 async function saveNewItem(){
   const name = document.getElementById('niName').value.trim();
   if(!name){ alert('請輸入教材名稱'); return; }
-  const barcode = document.getElementById('niBarcode').value.trim();
+  let barcode = document.getElementById('niBarcode').value.trim();
   const code = document.getElementById('niCode').value.trim();
   const category = document.getElementById('niCategory').value;
   const unit = document.getElementById('niUnit').value.trim() || '本';
@@ -1398,7 +1403,15 @@ async function saveNewItem(){
   const priceRaw = document.getElementById('priceInput').value;
   const priceEntered = priceRaw !== '' ? Math.max(0, parseFloat(priceRaw)) : null;
 
-  if(!barcode && !code){ alert('請至少輸入條碼編號（或代號），系統才能辨識這個教材'); return; }
+  if(!barcode && !code){
+    const nb = nextInternalBarcode();
+    if(!confirm('這個教材沒有輸入條碼或代號。\n要自動配一個內部條碼「' + nb + '」給它嗎？\n（建立後可到「條碼標籤」把它列印出來貼上，之後掃描就能辨識）')){
+      document.getElementById('niBarcode').focus();
+      return;
+    }
+    barcode = nb;
+    document.getElementById('niBarcode').value = nb;
+  }
   if(barcode && itemByBarcode(barcode)){ alert('條碼「' + barcode + '」已被其他教材使用'); return; }
   if(code && items.some(i=>i.code===code)){ alert('代號「' + code + '」已被其他教材使用'); return; }
 
@@ -1427,6 +1440,14 @@ async function saveNewItem(){
   document.getElementById('priceInput').value='';
   document.getElementById('qtyInput').value=1;
   document.getElementById('barcodeInput').focus();
+}
+
+function genBarcodeForNew(){
+  const el = document.getElementById('niBarcode');
+  if(el.value.trim() && !confirm('條碼欄已經有內容，要改用新產生的內部條碼取代嗎？')) return;
+  const nb = nextInternalBarcode();
+  el.value = nb;
+  flash('已配內部條碼 ' + nb + '，建立後可到「條碼標籤」列印貼上', true);
 }
 
 function openManualAdd(){
