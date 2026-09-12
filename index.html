@@ -1430,9 +1430,12 @@ async function saveNewItem(){
 }
 
 function openManualAdd(){
+  showView('scan');            // 新增教材的表單在「進貨／出貨」頁面裡，先切過去才看得到
   openNewItem('');
   document.getElementById('niFormTitle').textContent = '手動新增教材';
   document.getElementById('qtyInput').value = 0;
+  const form = document.getElementById('newItemForm');
+  if(form) form.scrollIntoView({behavior:'smooth', block:'center'});
   document.getElementById('niBarcode').focus();
 }
 
