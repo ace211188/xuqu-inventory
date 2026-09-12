@@ -1359,9 +1359,9 @@ async function checkout(){
     const batchId = 'IN-' + Date.now();
     const rows = cart.map(c=>{ const m = makeMove('in', c, c.qty, c.price, c.price, batchId); m.note = note || null; return m; });
     try{
-      for(const c of cart){ const it = itemById(c.id); if(it) await dbUpdateItemFields(it, {cost:c.price}); }
-      for(const c of cart){ await dbAdjustStock(c.id, c.qty); }
       await dbInsertMoves(rows);
+      for(const c of cart){ await dbAdjustStock(c.id, c.qty); }
+      for(const c of cart){ const it = itemById(c.id); if(it) await dbUpdateItemFields(it, {cost:c.price}); }
     }catch(e){ beep(false); flash('進貨失敗：'+(e.message||e), false); return; }
     beep(true);
     flash('進貨完成 ✓ 共 ' + n + ' 項 / ' + money(total) + '（記為一筆進貨單）', true);
@@ -1369,8 +1369,8 @@ async function checkout(){
     const saleId = uuid();
     const rows = cart.map(c=>{ const m = makeMove('out', c, c.qty, c.price, c.cost, saleId); m.note = note || null; return m; });
     try{
-      for(const c of cart){ await dbAdjustStock(c.id, -c.qty); }
       await dbInsertMoves(rows);
+      for(const c of cart){ await dbAdjustStock(c.id, -c.qty); }
       for(const c of cart){ const it = itemById(c.id); if(it) await dbUpdateItemFields(it, {sell:c.price}); }
     }catch(e){ beep(false); flash('出貨失敗：'+(e.message||e), false); return; }
     beep(true);
@@ -1424,9 +1424,9 @@ async function saveNewItem(){
     if(mode === 'in'){
       const unitPrice = priceEntered !== null ? priceEntered : cost;
       try{
-        await dbUpdateItemFields(created, {cost:unitPrice});
-        await dbAdjustStock(created.id, qty);
         await dbInsertMoves([ makeMove('in', created, qty, unitPrice, unitPrice, null) ]);
+        await dbAdjustStock(created.id, qty);
+        await dbUpdateItemFields(created, {cost:unitPrice});
       }catch(e){ flash('登記進貨失敗：'+(e.message||e), false); }
       await refresh();
     } else {
