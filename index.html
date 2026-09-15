@@ -1652,7 +1652,7 @@ function printSale(saleId){
 /* ---------- 訂購清單（補貨叫貨）---------- */
 async function addLowStockToOrders(){
   const low = items.filter(i=>i.stock < i.safety);
-  const existing = new Set(orders.map(o=>o.item_id));
+  const existing = new Set(orders.filter(o=>!o.ordered).map(o=>o.item_id));
   const toAdd = low.filter(i=>!existing.has(i.id));
   if(toAdd.length === 0){ flash(low.length ? '庫存不足的教材都已在訂購清單中' : '目前沒有庫存不足的教材', true); return; }
   try{
@@ -1679,7 +1679,7 @@ function orderSearch(){
   const raw = inp.value.trim(); const v = raw.toLowerCase();
   const box = document.getElementById('orderResults');
   if(!v){ _orderMatches = []; if(box){ box.classList.remove('show'); box.innerHTML=''; } return; }
-  const inOrders = new Set(orders.map(o=>o.item_id));
+  const inOrders = new Set(orders.filter(o=>!o.ordered).map(o=>o.item_id));
   const m = items.filter(i=> i.name.toLowerCase().includes(v)
                           || (i.code && i.code.toLowerCase().includes(v))
                           || barcodeList(i).some(b=>b.toLowerCase().includes(v)))
@@ -1698,7 +1698,7 @@ function orderSearch(){
 }
 async function orderPick(id){
   const item = itemById(id); if(!item) return;
-  if(orders.some(o=>o.item_id===item.id)){ flash('「'+item.name+'」已在訂購清單中', true); }
+  if(orders.some(o=>o.item_id===item.id && !o.ordered)){ flash('「'+item.name+'」已在訂購清單中', true); }
   else{
     try{ await orderInsert(item, 1); beep(true); flash('已加入訂購清單：'+item.name, true); }
     catch(e){ beep(false); flash('加入失敗：'+(e.message||e), false); return; }
