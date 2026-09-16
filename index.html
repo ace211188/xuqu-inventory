@@ -1656,7 +1656,7 @@ async function addLowStockToOrders(){
   const toAdd = low.filter(i=>!existing.has(i.id));
   if(toAdd.length === 0){ flash(low.length ? '庫存不足的教材都已在訂購清單中' : '目前沒有庫存不足的教材', true); return; }
   try{
-    for(const i of toAdd){ const target = Math.max(1, (i.safety||1)*2 - i.stock); await orderInsert(i, target); }
+    for(const i of toAdd){ const target = Math.max(1, i.safety||1); await orderInsert(i, target); }
   }catch(e){ flash('帶入失敗：'+(e.message||e), false); return; }
   renderOrders();
   flash('已帶入 ' + toAdd.length + ' 項庫存不足的教材（建議訂購量已預估）', true);
@@ -1700,7 +1700,7 @@ async function orderPick(id){
   const item = itemById(id); if(!item) return;
   if(orders.some(o=>o.item_id===item.id && !o.ordered)){ flash('「'+item.name+'」已在訂購清單中', true); }
   else{
-    try{ await orderInsert(item, 1); beep(true); flash('已加入訂購清單：'+item.name, true); }
+    try{ await orderInsert(item, Math.max(1, item.safety||1)); beep(true); flash('已加入訂購清單：'+item.name, true); }
     catch(e){ beep(false); flash('加入失敗：'+(e.message||e), false); return; }
   }
   const inp = document.getElementById('orderInput'); if(inp) inp.value='';
