@@ -349,6 +349,10 @@
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 </head>
 <body class="hasnav">
+<div id="movedBanner" style="position:sticky;top:0;z-index:9999;background:#C1272D;color:#fff;padding:10px 14px;text-align:center;font-weight:600;line-height:1.5">
+  ⚠️ 教材庫存已在 2026/10/8 搬到正式系統，請到後台「教材庫存」進出貨、盤點、訂購。這裡只能查看，不能再記錄。
+  <a href="https://overture-447922475874.asia-east1.run.app/materials" style="color:#fff;text-decoration:underline;margin-left:6px">前往正式系統 →</a>
+</div>
 
 <button class="menutoggle" onclick="toggleNav()">☰ 選單</button>
 <div class="navscrim" id="navScrim" onclick="toggleNav(false)"></div>
@@ -761,10 +765,37 @@ function getCfg(){
   return {url: DEFAULT_SUPABASE_URL, key: DEFAULT_SUPABASE_KEY};
 }
 function cloudReady(){ return !!sb; }
+
+/* 2026-10-08 教材已搬到正式系統（序曲系統「教材庫存」）：舊網頁只能看，任何寫入都擋掉。 */
+const MOVED_MSG = "教材庫存已搬到正式系統，請到後台「教材庫存」記錄。這裡只能查看，不能再記錄。";
+let movedAlertAt = 0;
+function movedBlocked(){
+  if(Date.now() - movedAlertAt > 2000){ movedAlertAt = Date.now(); alert(MOVED_MSG); }
+  const res = { data: null, error: { message: MOVED_MSG } };
+  const chain = new Proxy(function(){}, {
+    get(_, k){ if(k === "then") return (ok, ko) => Promise.resolve(res).then(ok, ko); return () => chain; },
+    apply(){ return chain; }
+  });
+  return chain;
+}
+function readOnlyClient(c){
+  const WRITE = ["insert", "update", "upsert", "delete"];
+  return new Proxy(c, { get(t, p){
+    if(p === "rpc") return () => movedBlocked();
+    if(p === "from") return (table) => {
+      const q = t.from(table);
+      return new Proxy(q, { get(qt, qp){
+        if(WRITE.includes(qp)) return () => movedBlocked();
+        const v = qt[qp]; return typeof v === "function" ? v.bind(qt) : v;
+      }});
+    };
+    const v = t[p]; return typeof v === "function" ? v.bind(t) : v;
+  }});
+}
 function initCloud(){
   const c = getCfg();
   if(c.url && c.key && window.supabase){
-    try{ sb = window.supabase.createClient(c.url, c.key); }catch(e){ sb = null; }
+    try{ sb = readOnlyClient(window.supabase.createClient(c.url, c.key)); }catch(e){ sb = null; }
   } else { sb = null; }
   updateBackendBanner();
   return cloudReady();
